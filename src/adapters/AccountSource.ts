@@ -71,6 +71,8 @@ export const TransactionStatusSchema = z.enum([
   "reversed",
 ]);
 
+export type TransactionStatus = z.infer<typeof TransactionStatusSchema>;
+
 export type RawTransaction = {
   /** PayPal's own id, or a synthetic one for CSV rows. */
   readonly id: string;
@@ -86,7 +88,7 @@ export type RawTransaction = {
   readonly capturedAt: string;
   /** PayPal's five-digit T-code, e.g. "T0001". Empty for CSV rows. */
   readonly eventCode: string;
-  readonly status: z.infer<typeof TransactionStatusSchema>;
+  readonly status: TransactionStatus;
   readonly subject: string | null;
   /**
    * The verbatim provider response. Kept because Spike S-2-live is still open:
