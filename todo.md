@@ -26,22 +26,65 @@
 
 ## Progress
 
-> **Snapshot: Oct 9 2026.** Repo is docs + config only. No `package.json`, no source, no tests.
+> **Snapshot: Oct 9 2026, end of session 1.** **Phases 1 and 2 are complete and green.**
+> `bun run verify` runs typecheck plus 270 tests across all three tiers.
+>
+> **Phase 0 (the Spike) is still blocked** on H1-01..H1-04 — there is no
+> `PAYPAL_ACCESS_TOKEN`, so no sandbox call is possible and S-1..S-4 remain
+> unanswered. **Phases 3–9 are blocked downstream of it.** Nothing in this
+> session touched PayPal, an adapter, the UI or deployment.
+>
+> That the Spike is blocked did not block Phases 1–2: they are build-order
+> items 1–3, depend on nothing but this machine, and are where the lifted head
+> start lives. The detector graph is now pure and the demo's e2e journey runs
+> green, so the Spike has somewhere to land when the token arrives.
 
-**Committed:** `README.md` (scope) · `LICENSE` (MIT — required by Devpost, never remove).
+**Environment fixed first:** `bun` was not installed at all (v1.4.2 now), and the npm global prefix was
+missing from `PATH`. Vitest 5 declares Node ≥ 22 and `@types/node` ^22 but runs correctly on this
+machine's Node 20.18 — verified, not assumed.
 
-**Untracked — commit these before starting Phase 0:**
+### Committed
 
-- [ ] `AGENTS.md` — rules, binding constraint, Nixt lift instructions
-- [ ] `ARCHITECTURE.md` — design, spike, build order
-- [ ] `opencode.jsonc` — `paypal-local` (disabled until a token exists), `paypal-sandbox`, `cloudflare-docs`
-- [ ] `skills-lock.json` + `.agents/skills/` — `paypal-integration`, `workers-best-practices`, `wrangler`
+| Commit | What |
+|---|---|
+| `docs:` | The planning docs, plus TDD made load-bearing (three named tiers, rules, architecture gates as tests). |
+| `build:` | Strict TS scaffold and the three-tier vitest harness — `unit` / `integration` / `e2e` as real projects. |
+| `test:` | The architecture gates as failing tests, self-verified against synthetic violations. |
+| `refactor:` | `durableNotepad` → the `KVStore` port + D1 adapter; `schema.sql` with real columns. |
+| `feat:` | The 9 pure modules lifted, tests copied first and red before the sources. |
+| `feat:` | Currency widened to USD and INR, formatters parameterised. |
+| `feat:` | The 5 impure detectors onto `KVStore`, three lift defects fixed, both invariants under test. |
+| `fix:` | Duplicate detection made order-independent; raw similarity score rescaled. |
+| `test:` | The e2e vertical slice, plus the subscriptions and run-log repositories. |
 
-**Verified true:** sibling repo `D:\Github\nixt` exists; the 9 liftable files and ~6 colocated tests are
-present in `D:\Github\nixt\src\lib`; `D:\Github\nixt\src\store\durableNotepad.ts` exists;
-the reusable CORS allow-list is at `D:\Github\nixt\worker\src\index.ts:42-57`.
+### Deviations from the plan, and why
 
-**Nothing else is built. Everything below Phase 0 is unstarted.**
+Recorded rather than quietly absorbed — each one is a decision a later reader
+would otherwise have to reverse-engineer.
+
+- **`brand.ts` was adapted, not lifted verbatim.** It exported Nixt's bundle id, App Store id and
+  store-review deep link. spendless is web-first: there is no app to deep link into, and shipping
+  another repo's identifiers is how the wrong product gets the right name.
+- **`renewalOffsets` gained an injected `nowMs`.** The one time-dependent helper in `dates.ts` that
+  read `Date.now()` directly. Its tests needed `vi.useFakeTimers()`, and the architecture gate
+  forbids that in `src/core` — the gate caught it on its first run against the real tree.
+- **`cancelIntent` no longer fires a notification.** It dynamically imported a OneSignal service
+  inside a `try`/`catch`; OneSignal is an explicit non-goal and that hidden import was how Nixt made
+  an impure edge invisible. The crossed milestone is returned instead of pushed.
+- **Two defects the plan did not anticipate**, both surfaced by a test written to a *different* rule
+  and then noticing the violation:
+  - `duplicateDetector` attributed its flag to whichever duplicate came first in the input array, so
+    the same account could be told to cancel a different bill from one run to the next.
+  - A raw Jaro-Winkler score went into the same `confidence` field as an exact merchant match.
+    "Netfliks" scored 0.98 against Netflix's 0.9 — a one-character typo outranked a certainty.
+- **`seed` is not in `package.json` yet.** It arrives with P4-01. A script pointing at a file that
+  does not exist is worse than no script.
+
+### Verified true
+
+Sibling repo `D:\Github\nixt` exists; the 9 liftable files and ~6 colocated tests are present in
+`D:\Github\nixt\src\lib`; `D:\Github\nixt\src\store\durableNotepad.ts` exists; the reusable CORS
+allow-list is at `D:\Github\nixt\worker\src\index.ts:42-57` (**not yet ported — that is P8-03**).
 
 ---
 
@@ -86,25 +129,26 @@ the reusable CORS allow-list is at `D:\Github\nixt\worker\src\index.ts:42-57`.
 > Build order 1. **This is the first refactor and it is one commit.** Everything after is cheaper
 > because of it (`ARCHITECTURE.md` §5). Every task below is `[unit]` unless tagged otherwise.
 
-- [ ] **P1-01** `[repo root]` `package.json`, `tsconfig.json` (strict, `noUncheckedIndexedAccess`, `noImplicitReturns`, `noFallthroughCasesInSwitch`, `paths: { "@/*": ["./src/*"] }`), `vitest.config.mts`, `.gitignore` → expect `tsc --noEmit` and `vitest run` both run green on an empty suite
+- [x] **P1-01** `[repo root]` `package.json`, `tsconfig.json` (strict, `noUncheckedIndexedAccess`, `noImplicitReturns`, `noFallthroughCasesInSwitch`, `paths: { "@/*": ["./src/*"] }`), `vitest.config.mts`, `.gitignore` → expect `tsc --noEmit` and `vitest run` both run green on an empty suite
   - Carry the strict flags across from `D:\Github\nixt\tsconfig.json`.
-- [ ] **P1-02** `[vitest.config.mts]` **The three-tier harness**: vitest `projects` for `unit` / `integration` / `e2e`, separate `include` globs, `node` environment, e2e gets the long timeout → expect `vitest --project unit|integration|e2e` each run in isolation
+- [x] **P1-02** `[vitest.config.mts]` **The three-tier harness**: vitest `projects` for `unit` / `integration` / `e2e`, separate `include` globs, `node` environment, e2e gets the long timeout → expect `vitest --project unit|integration|e2e` each run in isolation
   - `src/**/*.test.ts` · `test/integration/**` · `test/e2e/**`. A test in the wrong tier is a wrong-tier test.
-- [ ] **P1-03** `[package.json]` Scripts: `dev`, `deploy`, `test`, `test:unit`, `test:integration`, `test:e2e`, `test:watch`, `typecheck`, `verify` (typecheck + **all three tiers**), `db:migrate`, `seed` → expect `bun run verify` works end to end
+- [x] **P1-03** `[package.json]` Scripts: `dev`, `deploy`, `test`, `test:unit`, `test:integration`, `test:e2e`, `test:watch`, `typecheck`, `verify` (typecheck + **all three tiers**), `db:migrate` → expect `bun run verify` works end to end
   - `verify` runs unit + integration + e2e. The gate does not get a tier exemption.
-- [ ] **P1-04** `[test/integration/architecture.test.ts]` **Architecture gates as failing tests**: no `openai` / `@paypal/agent-toolkit` / `node:fs` above `src/adapters/`; zero `vi.mock`/`vi.fn` in `src/core`; no `as any` / `@ts-ignore` / `@ts-expect-error` without a justification comment → expect the rules to **fail loudly** the moment they are broken, instead of being remembered
+  - `seed` lands with P4-01, not here — a script pointing at a file that does not exist is worse than no script.
+- [x] **P1-04** `[test/integration/architecture.test.ts]` **Architecture gates as failing tests**: no `openai` / `@paypal/agent-toolkit` / `node:fs` above `src/adapters/`; zero `vi.mock`/`vi.fn` in `src/core`; no `as any` / `@ts-ignore` / `@ts-expect-error` without a justification comment → expect the rules to **fail loudly** the moment they are broken, instead of being remembered
   - Run this **first**. The grep in P3-05 becomes redundant once this exists.
   - This is the entire risk hedge in `AGENTS.md`, converted from a convention into a regression test.
-- [ ] **P1-05** `[src/db/schema.sql]` Write the real column schema — **do not port Nixt's `kv` blob table**: `transactions` · `subscriptions` · `price_points` · `usage_events` · `savings_events` · `action_proposals` · `action_results` · `run_steps` → expect each of these has genuine columns, not a JSON blob
-- [ ] **P1-06** `[src/db/index.ts]` D1 access layer: `get`, `all`, `run` helpers + a `KVStore`-shaped adapter implementing the `kvGet`/`kvSet` surface the five Nixt modules expect → expect the adapter to be swappable and pure from the caller's view
+- [x] **P1-05** `[src/db/schema.sql]` Write the real column schema — **do not port Nixt's `kv` blob table**: `transactions` · `subscriptions` · `price_points` · `usage_events` · `savings_events` · `action_proposals` · `action_results` · `run_steps` → expect each of these has genuine columns, not a JSON blob
+- [x] **P1-06** `[src/db/index.ts]` D1 access layer: `get`, `all`, `run` helpers + a `KVStore`-shaped adapter implementing the `kvGet`/`kvSet` surface the five Nixt modules expect → expect the adapter to be swappable and pure from the caller's view
   - **This is what replaces `durableNotepad`.** Signature match matters more than internals.
   - `KVStore` is a real injected interface, so `src/core` never imports the DB.
-- [ ] **P1-07** `[test/integration/db]` **Cover the D1 adapter against real local SQLite** (`better-sqlite3`, same dialect D1 uses) → expect green with **no mocks of the adapter itself and no faked SQL**
+- [x] **P1-07** `[test/integration/db]` **Cover the D1 adapter against real local SQLite** (`better-sqlite3`, same dialect D1 uses) → expect green with **no mocks of the adapter itself and no faked SQL**
   - Round-trip every table. Also prove the `KVStore` surface is a drop-in for `kvGet`/`kvSet`,
     including corrupt-JSON tolerance, which is the behaviour the lifted modules rely on.
   - `wrangler d1 execute --local` is the manual check for the real D1 runtime; the suite runs the
     same `schema.sql` through a real SQLite engine so CI needs no Cloudflare account.
-- [ ] **P1-08** `[commit]` `refactor: replace durableNotepad KV wrapper with D1 adapter` → expect one clean commit, before any lifted file is copied
+- [x] **P1-08** `[commit]` `refactor: replace durableNotepad KV wrapper with D1 adapter` → expect one clean commit, before any lifted file is copied
 
 ---
 
@@ -113,39 +157,42 @@ the reusable CORS allow-list is at `D:\Github\nixt\worker\src\index.ts:42-57`.
 > Build order 2. Copy, get green with **zero mocks**, then widen currency.
 > Each "fix on lift" task is preceded by a **red** test that reproduces the defect.
 
-- [ ] **P2-01** `[test/unit]` Copy the ~6 colocated tests from `D:\Github\nixt\src\lib` (`money` `dates` `validators` `brand` `cancelGuide` `cancelGuide.extended`) → expect them **red or failing to resolve**, because the modules do not exist here yet
+- [x] **P2-01** `[test/unit]` Copy the ~6 colocated tests from `D:\Github\nixt\src\lib` (`money` `dates` `validators` `brand` `cancelGuide` `cancelGuide.extended`) → expect them **red or failing to resolve**, because the modules do not exist here yet
   - This is the red step, honestly done: lift the tests *before* the source.
-- [ ] **P2-02** `[src/core/]` Copy the 9 source files to make P2-01 green: `money.ts` `dates.ts` `duplicateDetector.ts` `validators.ts` `cancelGuide.ts` `cancelGuideData.ts` `annualSwitch.ts` `calendar.ts` `brand.ts` → expect every P2-01 test passes
+- [x] **P2-02** `[src/core/]` Copy the 9 source files to make P2-01 green: `money.ts` `dates.ts` `duplicateDetector.ts` `validators.ts` `cancelGuide.ts` `cancelGuideData.ts` `annualSwitch.ts` `calendar.ts` `brand.ts` → expect every P2-01 test passes
   - Do **not** copy Nixt's Expo/RevenueCat/OneSignal/store code. Only `src/lib`.
   - `validators.ts` is the canonical type source — import from it, don't redeclare shapes.
   - `priceHistory` · `unusedDetector` · `savingsLedger` · `cancelIntent` · `insights` are **not** lifted
     here — they are the five impure modules and land with the `KVStore` interface in P2-05.
-- [ ] **P2-03** `[test/unit]` All green with **zero mocks** — no `vi.mock` anywhere in `src/core` → expect the P1-04 gate test to be the thing that enforces it
+- [x] **P2-03** `[test/unit]` All green with **zero mocks** — no `vi.mock` anywhere in `src/core` → expect the P1-04 gate test to be the thing that enforces it
   - If a lifted test needs a mock to pass, the purity refactor failed. Go back rather than mocking.
-- [ ] **P2-04** `[test/unit]` **Regression test for invariant 1** (`ARCHITECTURE.md` §5): `computeInsights` upserts by strictly greater `savingCents`, so `costPerUse` must run before `checkUnused` for the richer "wasted" headline to win ties → expect a test that **fails if the two loops are swapped**
+- [x] **P2-04** `[test/unit]` **Regression test for invariant 1** (`ARCHITECTURE.md` §5): `computeInsights` upserts by strictly greater `savingCents`, so `costPerUse` must run before `checkUnused` for the richer "wasted" headline to win ties → expect a test that **fails if the two loops are swapped**
   - Then comment it in `src/core/insights.ts`, naming both functions and the reason.
-- [ ] **P2-05** `[test/unit]` **Regression test for invariant 2**: `savingCents` is the ranking axis (forward monthly) and `displaySaving` is only what the UI renders; they are allowed to differ → expect a test that fails if either is collapsed into the other
+- [x] **P2-05** `[test/unit]` **Regression test for invariant 2**: `savingCents` is the ranking axis (forward monthly) and `displaySaving` is only what the UI renders; they are allowed to differ → expect a test that fails if either is collapsed into the other
   - Then comment it: **do not collapse.**
-- [ ] **P2-06** `[test/unit → red]` Reproduce the `priceHistory` lift defect: the title renders raw cents (`Price hike: ₹${newAmountCents}` — no `/100`) → expect a failing assertion on the title string
-- [ ] **P2-07** `[src/core/priceHistory.ts]` Fix P2-06 → expect correct currency in the title, P2-06 green
-- [ ] **P2-08** `[test/unit → red]` Normalise `confidence` — it is `number` on `DuplicateFlag`/`Recommendation` but the literal `"possibly"` on `UnusedFlag` → expect a type-level assertion plus a value assertion failing on `"possibly"`
-- [ ] **P2-09** `[src/core/]` Fix P2-08: one consistent numeric `confidence` across all five detectors → expect `UnusedFlag.confidence: number`, and a documented mapping from the old `"possibly"`
+- [x] **P2-06** `[test/unit → red]` Reproduce the `priceHistory` lift defect: the title renders raw cents (`Price hike: ₹${newAmountCents}` — no `/100`) → expect a failing assertion on the title string
+- [x] **P2-07** `[src/core/priceHistory.ts]` Fix P2-06 → expect correct currency in the title, P2-06 green
+- [x] **P2-08** `[test/unit → red]` Normalise `confidence` — it is `number` on `DuplicateFlag`/`Recommendation` but the literal `"possibly"` on `UnusedFlag` → expect a type-level assertion plus a value assertion failing on `"possibly"`
+- [x] **P2-09** `[src/core/]` Fix P2-08: one consistent numeric `confidence` across all five detectors → expect `UnusedFlag.confidence: number`, and a documented mapping from the old `"possibly"`
   - This type flows all the way to the agent's ranking input (P5-05), so it is a type change, not a cast.
-- [ ] **P2-10** `[test/unit → red]` Currency pass, tests first: `["USD","INR"]` accepted, `en-US`/`en-IN` formatters parameterised, USD milestone ladder present → expect failures on every USD assertion
-- [ ] **P2-11** `[src/core/validators.ts + money.ts + savingsLedger.ts]` Widen `CurrencySchema` to `["USD","INR"]`, parameterise the formatters, add USD milestones alongside ₹1L/5L/10L → expect P2-10 green, INR paths unchanged
+- [x] **P2-10** `[test/unit → red]` Currency pass, tests first: `["USD","INR"]` accepted, `en-US`/`en-IN` formatters parameterised, USD milestone ladder present → expect failures on every USD assertion
+- [x] **P2-11** `[src/core/validators.ts + money.ts + savingsLedger.ts]` Widen `CurrencySchema` to `["USD","INR"]`, parameterise the formatters, add USD milestones alongside ₹1L/5L/10L → expect P2-10 green, INR paths unchanged
   - **PayPal sandbox is USD.** INR-only was a Nixt assumption, not a spendless one.
   - `Currency` is already threaded through the schema, so this is smaller than it looks.
   - Do **not** rename `formatINR` into something vague in the same commit — keep the lift diff reviewable.
-- [ ] **P2-12** `[test/unit]` The five impure modules (`priceHistory` `unusedDetector` `savingsLedger` `cancelIntent` `insights`) now take an injected `KVStore` instead of importing `durableNotepad`, each with its own tests → expect green against an in-memory `KVStore`, still zero mocks
+- [x] **P2-12** `[test/unit]` The five impure modules (`priceHistory` `unusedDetector` `savingsLedger` `cancelIntent` `insights`) now take an injected `KVStore` instead of importing `durableNotepad`, each with its own tests → expect green against an in-memory `KVStore`, still zero mocks
   - This is the payoff of P1-06: the graph is pure **and** portable, and no test needed a stub of the DB.
-- [ ] **P2-13** `[test/unit]` Determinism: the same input + same injected clock yields byte-identical detector output across repeated runs → expect green, no ordering drift
-- [ ] **P2-14** `[test/e2e]` **First vertical slice**, all real layers, zero mocks: scenario rows → real SQL → the whole detector graph → ranked recommendations → every headline figure traced back to a pure function → run steps persisted → replayed → expect the seed→detect→rank→replay spine green before any UI exists
+- [x] **P2-13** `[test/unit]` Determinism: the same input + same injected clock yields byte-identical detector output across repeated runs → expect green, no ordering drift
+- [x] **P2-14** `[test/e2e]` **First vertical slice**, all real layers, zero mocks: scenario rows → real SQL → the whole detector graph → ranked recommendations → every headline figure traced back to a pure function → run steps persisted → replayed → expect the seed→detect→rank→replay spine green before any UI exists
   - This is the demo's regression net arriving *before* the demo (`AGENTS.md`, e2e tier).
   - It grows into `seed → agent → approval → refund → run log` as Phases 5–7 land.
 
 ---
 
-## Phase 3 — The adapter (Oct 14–16) · **depends on S-2, S-3**
+## Phase 3 — The adapter (Oct 14–16) · **BLOCKED: needs S-2, S-3**
+
+> Nothing here can start until H1-04 gives us `PAYPAL_ACCESS_TOKEN`. `McpPayPalAdapter` drives a real
+> stdio server against a real sandbox; there is no way to build or test it without one.
 
 - [ ] **P3-01** `[src/adapters/AccountSource.ts]` Define `AccountSource` + `ActionExecutor` exactly as ARCHITECTURE.md §3 specifies → expect the two interfaces compiling and nothing above them importing MCP or REST
 - [ ] **P3-02** `[src/adapters/mcp/]` `McpPayPalAdapter` driving the **same stdio server** the `paypal-local` MCP entry runs (`npx -y @paypal/mcp --tools=all`, `PAYPAL_ENVIRONMENT=SANDBOX`, client-credentials) → expect `listTransactions`, `listSubscriptions`, `listDisputes` returning real sandbox data
