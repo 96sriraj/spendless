@@ -4,6 +4,7 @@
  */
 
 import { ALIAS, normalizeName } from "./cancelGuide";
+import { CONFIDENCE, clampConfidence, type Confidence } from "./confidence";
 import { toMonthlyCents } from "./money";
 import type { Subscription } from "./validators";
 
@@ -14,7 +15,7 @@ export type DuplicateFlag = {
   readonly subtitle: string;
   readonly savingCents: number;
   readonly cta: string;
-  readonly confidence: number;
+  readonly confidence: Confidence;
 };
 
 // Longest keys first so "youtube premium" wins over "youtube" in contains-fallback.
@@ -74,10 +75,39 @@ function jaroWinkler(a: string, b: string): number {
 }
 
 function duplicateConfidence(ca: string, cb: string): number | null {
-  if (ca === cb) return 0.9;
+  if (ca === cb) return CONFIDENCE.exactMerchantMatch;
   const jw = jaroWinkler(ca, cb);
-  if (jw > 0.8) return Math.min(1, Math.round(jw * 100) / 100);
+  if (jw > 0.8) {
+    // Rescaled into the band *below* the exact rung. A raw Jaro-Winkler score
+    // was compared straight against the exact-match confidence, and "Netfliks"
+    // scored 0.98 against Netflix's 0.9 - inverting the scale, so a fuzzy guess
+    // would outrank a certainty. A one-character typo should never be more
+    // certain than an exact match, however high the string similarity.
+    const ceiling = CONFIDENCE.exactMerchantMatch - 0.01;
+    const scaled =
+      CONFIDENCE.fuzzyMerchantMatch +
+      (ceiling - CONFIDENCE.fuzzyMerchantMatch) * jw;
+    return clampConfidence(Math.round(scaled * 100) / 100);
+  }
   return null;
+}
+
+/**
+ * Which member of a duplicate pair the flag is attributed to.
+ *
+ * The pair is unordered, so the choice must not depend on input order. nixt
+ * emitted whichever subscription came first in the array, which meant the same
+ * account could be told to cancel a different bill from one run to the next -
+ * which is exactly what the determinism test caught.
+ *
+ * The more expensive plan, because the advice is "keep the cheaper one".
+ * Ties break on id, which is stable for a given account.
+ */
+function attributed(a: Subscription, b: Subscription): Subscription {
+  const aMonthly = toMonthlyCents(a.amountCents, a.billingCycle);
+  const bMonthly = toMonthlyCents(b.amountCents, b.billingCycle);
+  if (aMonthly !== bMonthly) return aMonthly > bMonthly ? a : b;
+  return a.id <= b.id ? a : b;
 }
 
 export function detectDuplicates(subs: readonly Subscription[]): DuplicateFlag[] {
@@ -87,16 +117,18 @@ export function detectDuplicates(subs: readonly Subscription[]): DuplicateFlag[]
     for (let j = i + 1; j < subs.length; j += 1) {
       const confidence = duplicateConfidence(canon[i]!, canon[j]!);
       if (confidence === null) continue;
-      const a = subs[i]!;
-      const b = subs[j]!;
+      const first = subs[i]!;
+      const second = subs[j]!;
+      const target = attributed(first, second);
+      const other = target === first ? second : first;
       flags.push({
         kind: "duplicate",
-        subId: a.id,
-        title: `${a.name} & ${b.name} look like duplicates`,
-        subtitle: `You may be paying for ${a.name} and ${b.name} twice. Keep one?`,
+        subId: target.id,
+        title: `${other.name} & ${target.name} look like duplicates`,
+        subtitle: `You may be paying for ${other.name} and ${target.name} twice. Keep one?`,
         savingCents: Math.min(
-          toMonthlyCents(a.amountCents, a.billingCycle),
-          toMonthlyCents(b.amountCents, b.billingCycle),
+          toMonthlyCents(first.amountCents, first.billingCycle),
+          toMonthlyCents(second.amountCents, second.billingCycle),
         ),
         cta: "Keep one?",
         confidence,
