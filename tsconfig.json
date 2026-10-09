@@ -1,0 +1,38 @@
+{
+  // Strict flags carried across from D:\Github\nixt\tsconfig.json. The extra
+  // ones (noUnusedLocals, noFallthroughCasesInSwitch, skipLibCheck) are here
+  // because the codebase is small enough to hold to them.
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2023"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "moduleDetection": "force",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+
+    // Strictness
+    "strict": true,
+    "noImplicitAny": true,
+    "strictNullChecks": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "forceConsistentCasingInFileNames": true,
+
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "types": ["node"],
+
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/*"]
+    }
+  },
+  "include": ["src/**/*.ts", "test/**/*.ts", "scripts/**/*.ts", "*.mts"],
+  "exclude": ["node_modules", "dist", ".wrangler", ".vitest"]
+}

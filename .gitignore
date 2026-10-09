@@ -1,0 +1,14 @@
+node_modules/
+dist/
+.wrangler/
+.vitest/
+coverage/
+
+# Secrets never belong in a committed file. See AGENTS.md.
+.env
+.env.*
+!.env.example
+
+*.log
+.DS_Store
+Thumbs.db

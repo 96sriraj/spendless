@@ -1,0 +1,33 @@
+{
+  "name": "spendless",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "The AI agent that spends less, not more. PayPal AI Hackathon entry.",
+  "license": "MIT",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:unit": "vitest run --project unit",
+    "test:integration": "vitest run --project integration",
+    "test:e2e": "vitest run --project e2e",
+    "test:watch": "vitest",
+    "verify": "bun run typecheck && vitest run",
+    "db:migrate": "wrangler d1 migrations apply spendless --local"
+  },
+  "dependencies": {
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261006.1",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^22.0.0",
+    "better-sqlite3": "^11.10.0",
+    "typescript": "~5.9.2",
+    "vite": "^7.1.0",
+    "vitest": "^5.0.3",
+    "wrangler": "^4.149.0"
+  }
+}
