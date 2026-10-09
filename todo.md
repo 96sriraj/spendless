@@ -56,6 +56,11 @@ machine's Node 20.18 — verified, not assumed.
 | `feat:` | The 5 impure detectors onto `KVStore`, three lift defects fixed, both invariants under test. |
 | `fix:` | Duplicate detection made order-independent; raw similarity score rescaled. |
 | `test:` | The e2e vertical slice, plus the subscriptions and run-log repositories. |
+| `docs:` | **Desk research answers S-2 and S-3 without a token.** Corrects three design errors. |
+| `feat:` | The adapter ports, with identity provenance and `capabilities()` on the interface. |
+| `feat:` | Recurrence inference — the module the project actually needs once identity is seed-authored. |
+| `feat:` | `CsvAccountAdapter` — the only adapter that carries a real merchant name. |
+| `test:` | A guard so the architecture gate can never pass by scanning nothing. |
 
 ### Deviations from the plan, and why
 
@@ -186,21 +191,47 @@ allow-list is at `D:\Github\nixt\worker\src\index.ts:42-57` (**not yet ported �
 - [x] **P2-14** `[test/e2e]` **First vertical slice**, all real layers, zero mocks: scenario rows → real SQL → the whole detector graph → ranked recommendations → every headline figure traced back to a pure function → run steps persisted → replayed → expect the seed→detect→rank→replay spine green before any UI exists
   - This is the demo's regression net arriving *before* the demo (`AGENTS.md`, e2e tier).
   - It grows into `seed → agent → approval → refund → run log` as Phases 5–7 land.
+- [x] **P2-15** `[src/core/recurrence.ts]` **Recurrence inference** — added after §11a showed it is what the project actually needs, not an extra → expect a repeated-interval + stable-amount series detected as a subscription, from either Transaction Search output or a CSV export
+  - Deliberately contains **no hardcoded T-code list**: those were never verified, and a guessed constant in the ranking path is worse than none. Recurrence is inferred from the series itself, which is checkable without a sandbox.
+  - Recurring means **both** a repeating interval **and** a stable amount. Three equal monthly charges is a subscription; three equal charges at irregular intervals is noise; a **rising** series is a price hike — a different detector, so calling it recurring would double-count it.
+  - Unattributable transactions are **dropped**, not lumped together: one made-up series is a fabricated recommendation.
+  - Verified by mutation — removing the identity guard, widening the amount tolerance and relaxing the cadence check each turn tests red.
 
 ---
 
-## Phase 3 — The adapter (Oct 14–16) · **BLOCKED: needs S-2, S-3**
+## Phase 3 — The adapter (Oct 14–16) · **partly done; MCP/REST blocked on H1-04**
 
-> Nothing here can start until H1-04 gives us `PAYPAL_ACCESS_TOKEN`. `McpPayPalAdapter` drives a real
-> stdio server against a real sandbox; there is no way to build or test it without one.
+> **P3-01 (the ports) and P3-04 (the CSV adapter) are complete** — neither needs a network call.
+> `McpPayPalAdapter` and `RestPayPalAdapter` cannot start until H1-04 gives us `PAYPAL_ACCESS_TOKEN`.
+>
+> **§11a desk research answered S-2 and S-3 without a token.** Read that section before starting
+> P3-02: the MCP tool is lossy in two known ways, `listTransactions` is capped at 31 days per call,
+> the plan schema is USD-only, and **the dispute tools are the buyer's, not the merchant's**.
 
-- [ ] **P3-01** `[src/adapters/AccountSource.ts]` Define `AccountSource` + `ActionExecutor` exactly as ARCHITECTURE.md §3 specifies → expect the two interfaces compiling and nothing above them importing MCP or REST
+- [x] **P3-01** `[src/adapters/AccountSource.ts]` Define `AccountSource` + `ActionExecutor` exactly as ARCHITECTURE.md §3 specifies → expect the two interfaces compiling and nothing above them importing MCP or REST
+  - Done, with three corrections research forced in (§11a): `listTransactions` must **chunk**, since PayPal caps a
+    window at 31 days and the MCP wrapper clamps silently; `RawTransaction` carries **`identitySource`** beside
+    `merchantKey`, because no PayPal API returns a merchant name to anyone; and **`capabilities()`** is on the
+    interface, so the dispute lane reports itself unavailable instead of 403-ing on camera.
 - [ ] **P3-02** `[src/adapters/mcp/]` `McpPayPalAdapter` driving the **same stdio server** the `paypal-local` MCP entry runs (`npx -y @paypal/mcp --tools=all`, `PAYPAL_ENVIRONMENT=SANDBOX`, client-credentials) → expect `listTransactions`, `listSubscriptions`, `listDisputes` returning real sandbox data
+  - **Known lossiness, from reading the toolkit source:** no `fields=all` (so no `payer_info`), no
+    `transaction_type` (so no server-side recurring filter — do it client-side off `transaction_event_code`), and
+    the subscription-plan schema is **USD-only**. Chunking is mandatory.
 - [ ] **P3-03** `[src/adapters/rest/]` `RestPayPalAdapter` — the escape hatch for what the toolkit lacks → expect at least one method that the MCP path could not serve
-- [ ] **P3-04** `[src/adapters/csv/]` `CsvAccountAdapter` — parses a PayPal activity export, **read-only** → expect a consumer-narrative fixture parsing without any network call
+- [x] **P3-04** `[src/adapters/csv/]` `CsvAccountAdapter` — parses a PayPal activity export, **read-only** → expect a consumer-narrative fixture parsing without any network call
+  - Done, and §11a made it **more important than planned**: a consumer export is the only PayPal surface that
+    names the payee, so this is where the lifted detectors get a real merchant identity.
+  - Two hazards handled: PayPal localises export dates (MM/DD vs DD/MM guessed wrong would silently shift every
+    renewal window — detected from the data, and **refused** when undeterminable), and amounts are normalised to
+    positive magnitudes with direction carried by `status`/`subject`.
+  - `capabilities()` claims read access only; `listSubscriptions`/`listDisputes` throw a typed error rather than
+    returning `[]`, because "no disputes" and "cannot see disputes" are different answers.
 - [ ] **P3-05** `[grep]` Run `grep -rn "openai\|@paypal/agent-toolkit\|node:fs" src/` and confirm **no module above the adapter layer imports any of them** → expect zero hits outside `src/adapters/`
   - Redundant with P1-04 — keep it as a one-glance manual confirmation, but the failing test is what actually holds the line.
 - [ ] **P3-06** `[test/integration]` Contract tests: all three adapters satisfy the same `AccountSource` shape → expect one shared contract suite run against MCP, REST, and CSV, green with **no live PayPal call**
+  - The suite must assert the two §11a properties, not just shape: that a >31-day `listTransactions` returns
+    every day (the chunking rule), and that a capability reported `false` **throws** rather than returning empty.
+  - The CSV adapter can run in this suite today. MCP and REST join it at P3-02/P3-03.
 - [ ] **P3-07** `[src/services/token.ts]` Token refresh ahead of the 3–8h sandbox TTL (use the measured value from S0-05) → expect a refresh with margin, never a mid-demo 401
   - `[unit]` for the expiry maths with an injected clock; `[integration]` for the refresh against a local HTTP server. No test waits on wall-clock time.
 
