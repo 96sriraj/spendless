@@ -44,17 +44,25 @@ function walk(dir: string, out: string[] = []): string[] {
   return out;
 }
 
-function repoSources(): SourceFile[] {
+type Discovery = {
+  readonly files: SourceFile[];
+  /** Absolute paths skipped, for the "nothing was scanned by accident" guard. */
+  readonly scanned: number;
+};
+
+function repoSources(): Discovery {
   const files: SourceFile[] = [];
+  let scanned = 0;
   for (const dir of SOURCE_DIRS) {
     for (const full of walk(path.join(REPO_ROOT, dir))) {
       files.push({
         path: path.relative(REPO_ROOT, full).replace(/\\/g, "/"),
         content: readFileSync(full, "utf8"),
       });
+      scanned += 1;
     }
   }
-  return files;
+  return { files, scanned };
 }
 
 function rules(violations: readonly Violation[]): string[] {
@@ -235,7 +243,18 @@ describe("architecture scanner - self-verification", () => {
 });
 
 describe("architecture gates - this repository", () => {
-  const violations = scan(repoSources());
+  const { files, scanned } = repoSources();
+  const violations = scan(files);
+
+  // A gate that quietly scans nothing passes forever. This is the same class of
+  // bug as a lint rule with an empty file glob, and it is invisible until
+  // something is actually broken.
+  it("is actually scanning the source tree", () => {
+    expect(scanned).toBe(files.length);
+    expect(scanned).toBeGreaterThan(10);
+    expect(files.map((f) => f.path)).toContain("src/adapters/AccountSource.ts");
+    expect(files.some((f) => f.path.startsWith("src/core/"))).toBe(true);
+  });
 
   it("has no banned imports above the adapter layer", () => {
     const found = violations.filter(
