@@ -38,9 +38,14 @@ PayPal's official MCP server / agent toolkit exists and maps almost 1:1 onto thi
 Search v1 (`/v1/reporting/transactions`), which requires a business account and a per-app
 "Transaction Search" permission toggle. There is no supported consumer/personal-side read.
 
-> ⚠️ **Inferred from PayPal docs, not verified against a live call.** This is Spike item S-1.
-> If it turns out consumer-side read *is* possible, roughly half this document collapses and
-> §3 simplifies. Verify before building anything.
+> ⚠️ **Partly verified by desk research (§11a), still open for a live call.** Reading PayPal's
+> OpenAPI specs and the `@paypal/agent-toolkit` source confirms the structural half: every
+> transaction tool is merchant-scoped, and `create_refund` targets a capture the calling merchant
+> owns — so binding A is confirmed and binding B is not buildable through these APIs.
+>
+> **The binding-agnostic finding is the more important one:** no PayPal API returns a *merchant*
+> name to anyone. A merchant already knows its own name, so PayPal never returns it; a buyer has no
+> consumer-side read at all. §11a explains how the seed supplies identity instead.
 
 ### The consequence, stated plainly
 
@@ -85,11 +90,25 @@ interface ActionExecutor {
 }
 ```
 
+Three corrections, each forced by §11a rather than by taste:
+
+1. **`listTransactions` takes any range; every implementation must chunk.** PayPal caps a
+   transaction-search window at **31 days** and the MCP wrapper clamps silently. An adapter that
+   forwards the caller's range is not an adapter, it is a data-loss bug. The contract test asserts
+   that a 90-day request returns 90 days' worth.
+2. **`RawTransaction` must carry an explicit identity field, and its provenance is a first-class
+   concern.** No PayPal API returns a merchant name to a merchant (§11a S-2). Identity is either
+   authored by the seed into `invoice_id`, or read from a CSV export. So the port is honest about
+   *where* the identity came from rather than pretending PayPal supplied it.
+3. **`capabilities()` is on the port, not a README footnote.** The dispute surface may not exist
+   for merchant credentials at all (§11a S-4). An adapter that cannot list disputes says so
+   structurally, and the demo degrades instead of 403-ing on camera.
+
 | Adapter | Binds | Notes |
 |---|---|---|
-| `McpPayPalAdapter` | `PAYPAL_ENVIRONMENT=SANDBOX` | Primary. Client-credentials, in-process. |
-| `RestPayPalAdapter` | Same | Escape hatch for what the toolkit lacks. |
-| `CsvAccountAdapter` | Consumer narrative | Parses PayPal activity export. Read-only. |
+| `McpPayPalAdapter` | `PAYPAL_ENVIRONMENT=SANDBOX` | Primary. Client-credentials, in-process. USD-only. Lossy: no `fields=all`, no `transaction_type`. |
+| `RestPayPalAdapter` | Same | Escape hatch for what the toolkit lacks — chiefly `fields=all` and `transaction_type`. |
+| `CsvAccountAdapter` | Consumer narrative | Parses PayPal activity export. Read-only. **The only adapter that carries real merchant identity**, because a consumer export *does* name the payee. |
 
 **Rule: no module above this layer may import `openai`, `@paypal/agent-toolkit`, or `node:fs`.**
 That is the whole risk hedge in one seam. If MCP covers everything, delete the others and nothing
@@ -325,21 +344,116 @@ subscriptions through real API calls, so the demo is rehearsable without hand-cr
 
 ## 11. The Spike — Oct 9–12, go/no-go
 
-Nothing below this section gets built until S-1 through S-4 are answered.
+### 11a. Desk research — done 2026-10-09, no token required
+
+Everything below was established by reading PayPal's published OpenAPI specifications and the
+`@paypal/agent-toolkit@1.11.0` / `@paypal/mcp@1.8.1` source. **None of it required a sandbox
+call**, and it changes the plan in three places. Live-call questions remain, marked as such.
+
+#### S-3 — ANSWERED for tool existence. 46 tools, not the 34 the README lists.
+
+| | |
+|---|---|
+| Present and usable | `list_transactions` · `create_refund` · `get_refund` · `cancel_subscription` · `show_subscription_details` · `update_subscription` · `create_subscription_plan` · `create_subscription` · `create_order` · `pay_order` · `get_order` · `list_invoices` |
+| Present but **wrong direction** | `list_disputes` · `get_dispute` · `accept_dispute_claim` — see S-4 below |
+| Undocumented bonus | `get_merchant_insights` → `GET /v1/merchant/insights` (`ORDERS`/`SALES` × `DAILY`…`YEARLY`). Aggregates only, but it is a legitimate merchant-dashboard hero metric. |
+| Extra surface not in the plan | 5 recurring-series tools, 12 invoicing tools, 4 shipment/product tools |
+
+#### S-2 — ANSWERED structurally. This is the finding that matters most.
+
+`list_transactions` is a thin wrapper: it calls `GET /v1/reporting/transactions` and returns
+`response.data` verbatim. So the response is exactly PayPal's `search_response` schema. Its
+`transaction_detail` entries contain `transaction_info`, `payer_info`, `shipping_info`,
+`cart_info`, `store_info`, `auction_info`, `incentive_info`.
+
+**There is no merchant or payee name anywhere in the response.**
+
+- `payer_info` is the **buyer**. From a merchant's own account the counterparty *is* the
+  customer — the merchant already knows its own name, so PayPal never returns it.
+- `transaction_info.paypal_account_id` is documented as "the ID of the PayPal account of the
+  counterparty" — again the buyer, not the payee.
+- `transaction_subject` is "passed by the payer … the payer controls this data".
+
+**The three fields a merchant *can* author, and therefore the only viable identity carriers:**
+
+| Field | Spec wording | Who writes it |
+|---|---|---|
+| `invoice_id` | "the invoice ID that is **sent by the merchant** with the transaction" | **Merchant**, at order creation |
+| `custom_field` | "**The merchant-provided** custom text" | **Merchant** |
+| `transaction_event_code` | five-digit T-code classifying money movement | PayPal — `T0001` etc. |
+
+> **This is the answer to "the one that quietly kills projects", and the answer is: it survives,
+> but only because we write the identity ourselves.**
+>
+> The lifted detectors are all shaped like "which merchant am I overpaying?" and every one of
+> them keys on a merchant name. No PayPal API will hand that to a merchant. But spendless *seeds
+> its own scenario through real API calls* (build order 5) — so the merchant name is
+> **authored by the seed**, written into `invoice_id`, and read back out of Transaction Search.
+>
+> The identity is not a gift from PayPal. It is an artefact of the demo fixture, produced by real
+> API calls against real sandbox objects. That is still a real integration — but the honest
+> description is "we can classify what we ourselves wrote", and the video must not imply otherwise.
+
+#### Three consequences the plan did not anticipate
+
+1. **`list_transactions` hard-clamps every request to a 31-day window.** The MCP wrapper clamps
+   it client-side (`if (dayRange > 31) start = end - 31 days`), and the API caps it too. The
+   §3 signature `listTransactions(range: DateRange)` therefore **cannot be implemented naively** —
+   a 90-day request silently returns 31 days. The adapter must chunk, and the contract test must
+   prove it.
+2. **The MCP tool exposes neither `fields` nor `transaction_type`.** Without `fields=all`,
+   `payer_info` is absent entirely; without `transaction_type`, there is no server-side filter
+   for recurring payments. Both are recoverable — the recurring filter is done client-side off
+   `transaction_event_code`, and `payer_info` is the buyer, which the merchant-side demo does not
+   need. **But the adapter is lossy, and `RestPayPalAdapter` remains the escape hatch for both.**
+3. **The MCP subscription-plan schema is USD-only.** `fixedPriceSchema.currency_code` is
+   `z.enum(["USD"])`. INR is reachable through REST, never through this path. The core already
+   supports both; only the MCP adapter is USD-bound.
+
+#### S-4 — HALF ANSWERED, and the dispute lane is in trouble
+
+`create_refund` → `POST /v2/payments/captures/{capture_id}/refund`. This is merchant-scoped by
+construction: the capture belongs to the merchant that made it, so the merchant's credentials
+refund it. **This structurally confirms binding A and rules out binding B** — a buyer cannot
+refund their own charge with this endpoint. Good news for the "it acts" claim.
+
+But the dispute tools are the reverse of what the plan assumed:
+
+- `list_disputes` / `get_dispute` / `accept_dispute_claim` all call **`/v1/customer/disputes/…`** —
+  the **customer** namespace, i.e. the buyer's view.
+- `accept_dispute_claim` posts to `/accept-claim`, whose own description reads: *"the dispute
+  closes **in the customer's favor** and PayPal automatically refunds money to the customer."*
+
+That is the **buyer conceding** and paying themselves. It is useless to a merchant protecting
+revenue, and with merchant credentials it will most likely 401/403. The real merchant-side
+dispute surface is the Disputes API / Resolution Center, reached via a **Platform** account —
+different account type, different onboarding, and **not exposed by the MCP server at all**.
+
+> **Risk to the build order.** Item 9 and P7-03 assume a working dispute lane. It may not exist.
+> Per `AGENTS.md` this is cut, not faked — so decide it at S-0-04 and do not design around it.
+> The refund and cancellation lanes are unaffected and carry the "it acts" claim on their own.
+
+#### S-1 — still open, and it does not need to block
+
+No consumer-side read endpoint was found in the 46-tool catalogue or the documented REST surface.
+Every transaction tool is merchant-scoped. **Absence of evidence, not evidence of absence** — the
+live test in S-1 still stands, but the prior is now much stronger, and nothing in the current
+build depends on B being possible.
+
+### 11b. Still requires a live sandbox call
 
 | # | Question | How | Blocks |
 |---|---|---|---|
-| **S-1** | Is consumer/personal-side transaction read *actually* impossible? | Inspect the connected account type; test OAuth login on a personal sandbox account. | §2 decision |
-| **S-2** | Does `list_transactions` return enough detail to derive recurrence? | Create a plan + subscription, capture with a personal account, re-query. **Inspect the actual fields** — merchant name, amount, date, `custom_id`. If merchant identity isn't there, the core detectors have no input. | Everything |
-| **S-3** | Which MCP tools actually work in sandbox? | Run `npx -y @paypal/mcp --tools=all` against the sandbox token and call each one. | Action layer scope |
-| **S-4** | Refund + cancel end-to-end? | `create_refund` on a capture. `cancel_subscription` on a live sub. | The "it acts" claim |
+| **S-0-01/02/03** | Is the connected account a business account with Transaction Search enabled? Does `list_transactions` return anything at all in sandbox? | Enable `paypal-local`; call it. | Everything |
+| **S-2-live** | Does a merchant-written `invoice_id` actually appear as `transaction_info.invoice_id`? Does `custom_id` populate `custom_field`? **Which T-codes do subscription renewals emit?** | Create a plan + subscription, capture, re-query, dump fields verbatim. | Seed script (P4-01) |
+| **S-3-live** | Which of the 46 tools actually authenticate and succeed in sandbox? | Call each one. | Action layer scope |
+| **S-4-live** | Refund + cancel end to end? | `create_refund` on a capture. `cancel_subscription` on a live sub. | The "it acts" claim |
+| **S-0-04** | **Can merchant credentials touch `/v1/customer/disputes` at all?** Can a dispute be forced in sandbox? | Force one, then call it. | The dispute lane |
+| **S-0-05** | Real token TTL (docs say `expires_in: 32400` = 9h for sandbox, which contradicts the 3–8h in `AGENTS.md`) | Time it to a 401. | Token refresh (P3-07) |
 
-**S-2 is the one that quietly kills projects.** Transaction history without merchant-level
-detail means the detectors — the entire lifted head start — have nothing to run on. Check it
-before anything else.
-
-Also confirm: sandbox token TTL, and whether disputes can be forced in sandbox
-(`/v1/customer/disputes/{id}/adjudicate` and `require-evidence` are sandbox-only endpoints).
+**S-2-live is now the sharpest question, and it is a much smaller one than it was.** It is no
+longer "does the data support the detectors" — it is "does the field we are going to write come
+back". That is a five-minute test with a known answer either way.
 
 ### Kill switch (from README)
 
@@ -360,7 +474,7 @@ Do not spend Nov 1–12 polishing something that cannot make a real PayPal call.
 | 6 | Run log persisted + rendered | 4 |
 | 7 | Agent: classify → rank → propose. No execution yet. | 2, 6 |
 | 8 | Action layer + approval UI | 7 |
-| 9 | Execution: refund, cancel, dispute. Guardrails on. | S-4, 8 |
+| 9 | Execution: refund, cancel. Guardrails on. **Dispute lane only if S-0-04 proves merchant credentials can reach it.** | S-4, 8 |
 | 10 | **Stretch:** expose spendless as an MCP server — cheap, and puts you in the MCP-server prize track | 9 |
 
 Step 7 before 8 before 9 is deliberate: the agent produces *proposals* long before it can move
