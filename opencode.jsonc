@@ -1,0 +1,47 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+
+  // Project-local tooling only. Global/general-purpose servers (context7) live in
+  // ~/.config/opencode/opencode.json so they apply to every repo.
+  //
+  // This set is intentionally small and expected to grow. See AGENTS.md
+  // "Tooling: MCP servers, skills, plugins".
+  "mcp": {
+    "servers": {
+      // ── PayPal ─────────────────────────────────────────────────────────────
+      // ARCHITECTURE.md §3 primary binding: in-process, client-credentials.
+      // This is the same stdio server McpPayPalAdapter will drive at runtime,
+      // so Spike S-3 ("which tools actually work?") can be answered against
+      // the real thing rather than by reading docs.
+      //
+      // Requires PAYPAL_ACCESS_TOKEN in the environment. Sandbox tokens live
+      // 3–8 hours — refresh proactively, never discover expiry mid-demo.
+      // Disabled by default so a missing token never blocks a cold start;
+      // set to false (or drop the key) once the token is exported.
+      "paypal-local": {
+        "type": "local",
+        "command": ["npx", "-y", "@paypal/mcp", "--tools=all"],
+        "environment": {
+          "PAYPAL_ACCESS_TOKEN": "{env:PAYPAL_ACCESS_TOKEN}",
+          "PAYPAL_ENVIRONMENT": "SANDBOX"
+        },
+        "disabled": true
+      },
+
+      // ARCHITECTURE.md §3 stretch goal. OAuth, no token store to manage,
+      // good for poking at the catalogue interactively during the Spike.
+      // Sign in from the TUI: /mcps -> paypal-sandbox.
+      "paypal-sandbox": {
+        "type": "remote",
+        "url": "https://mcp.sandbox.paypal.com/mcp"
+      },
+
+      // ── Cloudflare ──────────────────────────────────────────────────────────
+      // ARCHITECTURE.md §10 primary deployment: Workers + D1.
+      "cloudflare-docs": {
+        "type": "remote",
+        "url": "https://docs.mcp.cloudflare.com/mcp"
+      }
+    }
+  }
+}
