@@ -193,6 +193,45 @@ describe("architecture scanner - self-verification", () => {
     ]);
     expect(violations).toHaveLength(3);
   });
+
+  it("reads code, not the prose about it", () => {
+    // A doc comment naming vi.mock() documents the ban; it is not a violation.
+    const violations = scan([
+      {
+        path: "src/core/dates.ts",
+        content: [
+          "/**",
+          " * Nixt's version used vi.useFakeTimers() in its tests, which the",
+          " * architecture gate forbids here.",
+          " */",
+          "export const MS_PER_DAY = 86400000;",
+          "",
+        ].join("\n"),
+      },
+    ]);
+    expect(violations).toEqual([]);
+  });
+
+  it("still catches a violation that follows a comment on the same line", () => {
+    const violations = scan([
+      {
+        path: "src/core/x.ts",
+        content: "/* header */ import OpenAI from 'openai';\n",
+      },
+    ]);
+    expect(violations).toHaveLength(1);
+    expect(violations[0]?.line).toBe(1);
+  });
+
+  it("does not treat a // inside a string as the start of a comment", () => {
+    const violations = scan([
+      {
+        path: "src/core/brand.ts",
+        content: 'export const URL = "https://example.com"; // vi.mock()\n',
+      },
+    ]);
+    expect(violations).toEqual([]);
+  });
 });
 
 describe("architecture gates - this repository", () => {

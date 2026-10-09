@@ -72,6 +72,67 @@ function lineOf(content: string, offset: number): number {
   return line;
 }
 
+/**
+ * Blank out comments while preserving every offset and newline, so a rule that
+ * fires on a comment is not mistaken for code. Strings are deliberately left
+ * intact - import specifiers live inside them.
+ *
+ * Known limit: a regex literal containing `//` or `/*` is not distinguished
+ * from a comment. No file in src/ does that; if one appears, this is the first
+ * place to look.
+ */
+export function stripComments(content: string): string {
+  const out = content.split("");
+  let i = 0;
+  const blank = (from: number, to: number): void => {
+    for (let j = from; j < to && j < out.length; j += 1) {
+      if (out[j] !== "\n") out[j] = " ";
+    }
+  };
+
+  while (i < content.length) {
+    const ch = content[i];
+    const next = content[i + 1];
+
+    if (ch === "/" && next === "/") {
+      let end = content.indexOf("\n", i);
+      if (end === -1) end = content.length;
+      blank(i, end);
+      i = end;
+      continue;
+    }
+
+    if (ch === "/" && next === "*") {
+      let end = content.indexOf("*/", i + 2);
+      end = end === -1 ? content.length : end + 2;
+      blank(i, end);
+      i = end;
+      continue;
+    }
+
+    if (ch === "'" || ch === '"' || ch === "`") {
+      const quote = ch;
+      i += 1;
+      while (i < content.length) {
+        if (content[i] === "\\") {
+          i += 2;
+          continue;
+        }
+        if (content[i] === quote) {
+          i += 1;
+          break;
+        }
+        i += 1;
+      }
+      continue;
+    }
+
+    i += 1;
+  }
+
+  return out.join("");
+}
+
 /** Every module specifier a file imports, from ESM, dynamic import or require. */
 export function importsOf(content: string): Import[] {
   const out: Import[] = [];
@@ -109,13 +170,16 @@ export function scan(files: readonly SourceFile[]): Violation[] {
   for (const file of files) {
     const filePath = file.path.replace(/\\/g, "/");
     const lines = file.content.split("\n");
+    // Rules read the code, not the prose about the code. A doc comment that
+    // names vi.mock() is documenting the ban, not breaking it.
+    const code = stripComments(file.content);
     const isSource = filePath.startsWith(SRC_PREFIX);
     const inAdapters = filePath.startsWith(ADAPTER_LAYER_PREFIX);
     const inCore = filePath.startsWith(CORE_PREFIX);
 
     // Rule 1: the adapter-layer import ban. Only src/ is governed.
     if (isSource && !inAdapters) {
-      for (const found of importsOf(file.content)) {
+      for (const found of importsOf(code)) {
         if (BANNED_ABOVE_ADAPTERS.includes(found.specifier)) {
           violations.push({
             rule: "no-banned-import-above-adapters",
@@ -133,7 +197,7 @@ export function scan(files: readonly SourceFile[]): Violation[] {
     if (inCore) {
       for (const primitive of MOCK_PRIMITIVES) {
         const needle = `${primitive}(`;
-        let at = file.content.indexOf(needle);
+        let at = code.indexOf(needle);
         while (at >= 0) {
           violations.push({
             rule: "no-mocks-in-core",
@@ -143,7 +207,7 @@ export function scan(files: readonly SourceFile[]): Violation[] {
               `uses ${primitive}() in the deterministic core - fix the boundary, ` +
               `do not mock (AGENTS.md)`,
           });
-          at = file.content.indexOf(needle, at + needle.length);
+          at = code.indexOf(needle, at + needle.length);
         }
       }
     }
@@ -151,7 +215,7 @@ export function scan(files: readonly SourceFile[]): Violation[] {
     // Rule 3: no silent type escapes anywhere in src/.
     if (isSource) {
       for (const suppression of TS_SUPPRESSIONS) {
-        let at = file.content.indexOf(suppression);
+        let at = code.indexOf(suppression);
         while (at >= 0) {
           const lineIndex = lineOf(file.content, at) - 1;
           if (!hasJustification(lines, lineIndex)) {
@@ -164,7 +228,7 @@ export function scan(files: readonly SourceFile[]): Violation[] {
                 `within two lines of it`,
             });
           }
-          at = file.content.indexOf(suppression, at + suppression.length);
+          at = code.indexOf(suppression, at + suppression.length);
         }
       }
     }
