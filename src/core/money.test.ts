@@ -1,31 +1,97 @@
 import { describe, expect, it } from "vitest";
-import { formatINR, formatINRCompact, lifetimeSavingsVsYearly, monthlyTotal, savingsEstimate, toMonthlyCents, toYearlyCents, yearlyEstimate, yearlySavingsFromMonthly, yearlySavingsVsMonthly } from "./money";
+import { formatMoney, formatMoneyCompact, lifetimeSavingsVsYearly, monthlyTotal, savingsEstimate, toMonthlyCents, toYearlyCents, yearlyEstimate, yearlySavingsFromMonthly, yearlySavingsVsMonthly } from "./money";
 
-describe("money — formatINR", () => {
+// The formatting blocks are rewritten for spendless. Nixt was INR-only with
+// hardcoded en-IN formatters; the PayPal sandbox is USD, so money.ts is
+// parameterised by currency and every assertion below names which one it is
+// checking. The normalisation maths (toMonthlyCents, totals, savings) is
+// currency-free and is lifted unchanged.
+describe("money — formatMoney, INR", () => {
   it("should format 0 paise as INR zero", () => {
-    const out = formatINR(0);
+    const out = formatMoney(0, "INR");
     expect(out).toContain("₹");
     // en-IN may use ₹0 or ₹0.00 — allow both
     expect(out.replace(/\s/g, "")).toMatch(/₹0(\.00)?/);
   });
 
   it("should format 49900 paise (₹499) with INR symbol", () => {
-    const out = formatINR(49_900);
+    const out = formatMoney(49_900, "INR");
     expect(out).toContain("₹");
     expect(out).toContain("499");
   });
 
   it("should preserve paise fractional digits for non-whole rupees", () => {
-    const out = formatINR(49_950); // ₹499.50
+    const out = formatMoney(49_950, "INR"); // ₹499.50
     expect(out).toContain("₹");
     // maximumFractionDigits 2, so 499.5 should show .5 or .50
     expect(out).toMatch(/499[.,]5/);
   });
 
   it("should format large amount with en-IN grouping", () => {
-    const out = formatINR(1_23_456_00); // ₹1,23,456
+    const out = formatMoney(1_23_456_00, "INR"); // ₹1,23,456
     expect(out).toContain("₹");
     expect(out.replace(/\s/g, "").replace(/₹/, "")).toMatch(/1,23,456/);
+  });
+});
+
+describe("money — formatMoney, USD", () => {
+  it("should format 0 cents as $0.00", () => {
+    const out = formatMoney(0, "USD");
+    expect(out).toContain("$");
+    expect(out.replace(/\s/g, "")).toMatch(/\$0(\.00)?/);
+  });
+
+  it("should format 1599 cents as $15.99", () => {
+    const out = formatMoney(1_599, "USD");
+    expect(out).toContain("$");
+    expect(out).toContain("15.99");
+  });
+
+  it("should preserve cent fractional digits for non-whole dollars", () => {
+    // Same contract as the INR case: minimumFractionDigits is 0, so $49.50
+    // may render as $49.5. Lifted behaviour, and the saving is only a space.
+    expect(formatMoney(4_950, "USD")).toMatch(/49(\.5|\.50)/);
+  });
+
+  it("should group thousands with en-US separators, not en-IN lakhs", () => {
+    const out = formatMoney(1_234_567, "USD"); // $12,345.67
+    expect(out).toContain("$");
+    expect(out.replace(/\s/g, "").replace(/\$/, "")).toMatch(/12,345\.67/);
+    // en-IN would have produced 1,23,456.77 - the Indian grouping is the
+    // whole reason the formatter is parameterised.
+    expect(out).not.toContain("1,23,456");
+  });
+
+  it("should render the same cents differently per currency", () => {
+    expect(formatMoney(499_00, "INR")).toContain("₹");
+    expect(formatMoney(499_00, "USD")).toContain("$");
+  });
+
+  it("should default to USD, because the sandbox is USD", () => {
+    expect(formatMoney(1_599)).toBe(formatMoney(1_599, "USD"));
+  });
+});
+
+describe("money — formatMoneyCompact", () => {
+  it("should compact INR at a lakh and fall back below it", () => {
+    const compact = formatMoneyCompact(1_00_000_00, "INR");
+    expect(compact).toContain("₹");
+    // Below 1 lakh rupees, compact equals the plain format.
+    expect(formatMoneyCompact(50_000, "INR")).toBe(formatMoney(50_000, "INR"));
+  });
+
+  it("should compact USD at a thousand and fall back below it", () => {
+    // en-US compact switches to K/M/B at a much lower threshold than en-IN's
+    // 1 lakh, which is precisely why this cannot be one hardcoded rule.
+    const compact = formatMoneyCompact(1_250_000, "USD"); // $12,500
+    expect(compact).toContain("$");
+    expect(compact.replace(/\s/g, "")).toMatch(/12(\.5)?K/i);
+
+    expect(formatMoneyCompact(99_00, "USD")).toBe(formatMoney(99_00, "USD"));
+  });
+
+  it("should keep USD compact output below a thousand unchanged", () => {
+    expect(formatMoneyCompact(50_000, "USD")).toBe(formatMoney(50_000, "USD"));
   });
 });
 
@@ -80,23 +146,6 @@ describe("money — yearlyEstimate + monthlyTotal", () => {
   it("should return 0 for empty list", () => {
     expect(monthlyTotal([])).toBe(0);
     expect(yearlyEstimate([])).toBe(0);
-  });
-});
-
-describe("money — formatINRCompact", () => {
-  it("should contain INR symbol and be compact for large values", () => {
-    const out = formatINRCompact(1_23_45_678_00);
-    expect(out).toContain("₹");
-    expect(out.length).toBeGreaterThan(1);
-  });
-  it("should fallback to normal format for <1000 rupees", () => {
-    const compact = formatINRCompact(50000);
-    const normal = formatINR(50000);
-    expect(compact).toBe(normal);
-  });
-  it("should compact lakhs with notation", () => {
-    const out = formatINRCompact(10_00_000_00);
-    expect(out).toContain("₹");
   });
 });
 

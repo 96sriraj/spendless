@@ -1,41 +1,66 @@
 /**
- * Money helpers — INR only (per AGENTS D3/D4, single currency).
- * All amounts in integer cents/paise to avoid float errors.
+ * Money helpers — integer minor units, never floats.
+ *
+ * Parameterised by currency. nixt's version was INR-only with hardcoded en-IN
+ * formatters; the PayPal sandbox spendless talks to is USD, so `formatMoney`
+ * takes the currency and picks the locale from it. The normalisation maths
+ * below is currency-free and lifted unchanged.
  */
 
-import type { BillingCycle } from "./validators";
+import { DEFAULT_CURRENCY, type BillingCycle, type Currency } from "./validators";
 
 // ---------------------------------------------------------------------------
 // Formatting
 // ---------------------------------------------------------------------------
-export function formatINR(amountCents: number): string {
-  const rupees = amountCents / 100;
-  // en-IN with INR symbol, no fraction override — preserve paise
-  return new Intl.NumberFormat("en-IN", {
+
+/** en-IN groups by lakh (1,23,456); en-US by thousands (123,456). */
+const CURRENCY_LOCALE: Record<Currency, string> = {
+  USD: "en-US",
+  INR: "en-IN",
+};
+
+/**
+ * Compact-notation threshold, in major units. en-US switches to K/M/B far
+ * earlier than en-IN switches to L/Cr, so one hardcoded threshold cannot
+ * serve both - which is the entire reason this function is parameterised.
+ */
+const COMPACT_THRESHOLD: Record<Currency, number> = {
+  USD: 10_000,
+  INR: 100_000,
+};
+
+export function formatMoney(
+  amountCents: number,
+  currency: Currency = DEFAULT_CURRENCY,
+): string {
+  return new Intl.NumberFormat(CURRENCY_LOCALE[currency], {
     style: "currency",
-    currency: "INR",
+    currency,
     minimumFractionDigits: 0,
     maximumFractionDigits: 2,
-  }).format(rupees);
+  }).format(amountCents / 100);
 }
 
 /**
- * Compact INR — uses compact notation for large values (>=1L),
- * falls back to formatINR for small amounts. Preserves paise logic.
- * e.g. 12345600 -> ₹1.2L, 15000000 -> ₹1.5L / ₹15L
+ * Compact money — compact notation above the currency's own threshold,
+ * plain format below it so small figures stay exact.
+ * e.g. INR 12345600 -> ₹1.2L, USD 1250000 -> $12.5K
  */
-export function formatINRCompact(amountCents: number): string {
-  const rupees = amountCents / 100;
-  if (Math.abs(rupees) >= 100_000) {
-    return new Intl.NumberFormat("en-IN", {
+export function formatMoneyCompact(
+  amountCents: number,
+  currency: Currency = DEFAULT_CURRENCY,
+): string {
+  const major = amountCents / 100;
+  if (Math.abs(major) >= COMPACT_THRESHOLD[currency]) {
+    return new Intl.NumberFormat(CURRENCY_LOCALE[currency], {
       style: "currency",
-      currency: "INR",
+      currency,
       notation: "compact",
       minimumFractionDigits: 0,
       maximumFractionDigits: 1,
-    }).format(rupees);
+    }).format(major);
   }
-  return formatINR(amountCents);
+  return formatMoney(amountCents, currency);
 }
 
 // ---------------------------------------------------------------------------

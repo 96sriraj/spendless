@@ -23,7 +23,7 @@ describe("validators — SubscriptionInput", () => {
     expect(parsed.success).toBe(true);
   });
 
-  it("should accept yearly without explicit currency (defaults to INR)", () => {
+  it("should accept yearly without explicit currency (defaults to USD)", () => {
     const parsed = SubscriptionInputSchema.safeParse({
       name: "Adobe CC",
       amountCents: 499900,
@@ -33,8 +33,36 @@ describe("validators — SubscriptionInput", () => {
     });
     expect(parsed.success).toBe(true);
     if (parsed.success) {
-      expect(parsed.data.currency).toBe("INR");
+      // USD, not INR: nixt was India-first and defaulted to INR, but the
+      // PayPal sandbox spendless actually talks to is USD. A default that
+      // silently mislabels every figure in the demo is not a default.
+      expect(parsed.data.currency).toBe("USD");
     }
+  });
+
+  it("should accept USD explicitly", () => {
+    const parsed = SubscriptionInputSchema.safeParse({
+      name: "Netflix",
+      amountCents: 1599,
+      currency: "USD",
+      billingCycle: "monthly",
+      nextRenewal: futureIso(3),
+      category: "entertainment",
+    });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) expect(parsed.data.currency).toBe("USD");
+  });
+
+  it("should reject a currency that is neither USD nor INR", () => {
+    const parsed = SubscriptionInputSchema.safeParse({
+      name: "Netflix",
+      amountCents: 1599,
+      currency: "EUR",
+      billingCycle: "monthly",
+      nextRenewal: futureIso(3),
+      category: "entertainment",
+    });
+    expect(parsed.success).toBe(false);
   });
 
   it("should reject missing name", () => {

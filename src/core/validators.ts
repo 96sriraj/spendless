@@ -20,8 +20,20 @@ export function toSubscriptionId(raw: string): SubscriptionId {
 export const BillingCycleSchema = z.enum(["monthly", "yearly", "weekly"]);
 export type BillingCycle = z.infer<typeof BillingCycleSchema>;
 
-export const CurrencySchema = z.enum(["INR"]);
+/**
+ * USD or INR.
+ *
+ * nixt hardcoded INR (`z.enum(["INR"])`, en-IN formatters, rupee milestones)
+ * because it was an India-first app. spendless talks to the PayPal sandbox,
+ * which is USD. Both are supported and the currency is threaded per row - it
+ * is already on the schema, so this is smaller than it looks.
+ *
+ * The default is USD, deliberately. A default that silently mislabels every
+ * figure in the demo is worse than no default.
+ */
+export const CurrencySchema = z.enum(["USD", "INR"]);
 export type Currency = z.infer<typeof CurrencySchema>;
+export const DEFAULT_CURRENCY: Currency = "USD";
 
 // ---------------------------------------------------------------------------
 // ISO date helpers
@@ -45,7 +57,7 @@ function isFutureIsoDate(value: string): boolean {
 export const SubscriptionInputSchema = z.object({
   name: z.string().min(1, "name required").max(64, "max 64 chars").trim(),
   amountCents: z.number().int().positive("amountCents > 0"),
-  currency: CurrencySchema.default("INR"),
+  currency: CurrencySchema.default(DEFAULT_CURRENCY),
   billingCycle: BillingCycleSchema,
   nextRenewal: z
     .string()

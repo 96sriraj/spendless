@@ -10,7 +10,7 @@
  * in the subtitle.
  */
 
-import { formatINR, toMonthlyCents } from "./money";
+import { formatMoney, toMonthlyCents } from "./money";
 import type { Subscription } from "./validators";
 
 export type AnnualSwitchFlag = {
@@ -36,16 +36,20 @@ export function annualSwitchFlag(sub: Subscription): AnnualSwitchFlag | null {
 
   const monthlyEquivalent = toMonthlyCents(yearlySavingCents, "yearly");
   const percent = Math.round((yearlySavingCents / monthlyYearTotal) * 100);
+  // The subscription's own currency, not a global default: a portfolio can
+  // hold both, and mislabelling a rupee figure as dollars is the exact bug
+  // this parameterisation exists to prevent.
+  const money = (cents: number): string => formatMoney(cents, sub.currency);
 
   return {
     kind: "annualSwitch",
     subId: sub.id,
-    title: `${sub.name}: switch to annual, save ${formatINR(yearlySavingCents)}/yr`,
-    subtitle: `Annual ${formatINR(annual)} vs ${formatINR(monthlyYearTotal)}/yr monthly · ${percent}% off`,
+    title: `${sub.name}: switch to annual, save ${money(yearlySavingCents)}/yr`,
+    subtitle: `Annual ${money(annual)} vs ${money(monthlyYearTotal)}/yr monthly · ${percent}% off`,
     // Rank on the monthly-equivalent (comparable axis) but display the yearly
     // saving, which is the figure that actually sells the switch.
     savingCents: monthlyEquivalent,
-    displaySaving: `Save ${formatINR(yearlySavingCents)}/yr`,
+    displaySaving: `Save ${money(yearlySavingCents)}/yr`,
     yearlySavingCents,
     cta: "Switch",
     confidence: 1,
