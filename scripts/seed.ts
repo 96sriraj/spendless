@@ -172,6 +172,89 @@ function transferLink(receiver: string, amountCents: number): string {
 }
 
 // ---------------------------------------------------------------------------
+// Currency probe
+// ---------------------------------------------------------------------------
+
+/**
+ * Which currencies this account will actually accept.
+ *
+ * Two failures in a row, in opposite directions, both about currency:
+ *
+ *   USD  order created, approval screen refused with UNSUPPORTED_PAYEE_CURRENCY
+ *   INR  order creation refused with INVALID_CURRENCY_CODE
+ *
+ * So the payee takes neither. Rather than keep guessing from documentation —
+ * which was wrong twice — ask the API. Each candidate is tried against order
+ * creation and the verdict recorded.
+ *
+ * Note what a pass here does NOT prove: USD passed creation and still failed
+ * at the payee. Creation acceptance and payee acceptance are different gates,
+ * and only the approval screen tests the second one.
+ */
+async function probeCurrencies(): Promise<void> {
+  const candidates = [
+    "USD", "INR", "EUR", "GBP", "AUD", "CAD", "SGD", "AED", "JPY", "NZD",
+    "HKD", "CHF", "SEK", "NOK", "DKK", "PLN", "CZK", "BRL", "MXN", "ZAR",
+  ];
+  const accepted: string[] = [];
+  const rejected: string[] = [];
+
+  console.log(`spendless seed — currency probe\n`);
+  console.log("Asking the API what this account accepts, one currency at a time.\n");
+  console.log("(Each attempt creates a CREATED order that will simply expire.)\n");
+
+  for (const currency of candidates) {
+    const { status, body } = await call("/v2/checkout/orders", {
+      method: "POST",
+      body: JSON.stringify(
+        buildOrderPayload(
+          { key: "probe", label: "probe", amountCents: 100 },
+          currency as Currency,
+        ),
+      ),
+    });
+    if (status >= 200 && status < 300) {
+      accepted.push(currency);
+      console.log(`  accepted   ${currency}`);
+    } else {
+      rejected.push(currency);
+      console.log(`  rejected   ${currency}  ${describeFailure(body).slice(0, 90)}`);
+    }
+    // Sandbox rate-limits. Twenty currencies back to back invites a 429, which
+    // would read as "rejected" and send us down the wrong path entirely.
+    await new Promise((r) => setTimeout(r, 250));
+  }
+
+  console.log(`\naccepted: ${accepted.length > 0 ? accepted.join(", ") : "(none)"}`);
+  console.log(`rejected: ${rejected.length}`);
+
+  if (accepted.length === 0) {
+    console.log(
+      "\nNothing was accepted, so this is not a currency choice — the account or the\n" +
+        "app is not set up to take orders at all. Check that the app is on the\n" +
+        "sandbox business account and that Transaction Search is enabled (H1-03).",
+    );
+    process.exit(1);
+  }
+
+  if (accepted.length > 1) {
+    console.log(
+      "\nMore than one was accepted, so this probe cannot be the last word: USD\n" +
+        "passed creation before and still failed at the payee. Try each of the\n" +
+        "accepted ones through the approval screen:\n\n" +
+        `  $env:SEED_CURRENCY = "${accepted[0]}"; bun run seed`,
+    );
+  } else {
+    console.log(`\nExactly one was accepted. Use it:\n\n  $env:SEED_CURRENCY = "${accepted[0]}"; bun run seed`);
+  }
+}
+
+if (method === "probe") {
+  await probeCurrencies();
+  process.exit(0);
+}
+
+// ---------------------------------------------------------------------------
 
 const created: Created[] = [];
 console.log(`spendless seed — method: ${method}  currency: ${SEED_CURRENCY}\n`);
