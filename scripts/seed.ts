@@ -143,15 +143,40 @@ function describeFailure(body: unknown): string {
 async function createOrder(entry: (typeof SCENARIO)[number]): Promise<Created | null> {
   const { status, body } = await call("/v2/checkout/orders", {
     method: "POST",
-    body: JSON.stringify(buildOrderPayload(entry, SEED_CURRENCY)),
+    body: JSON.stringify(buildOrderPayload(entry, SEED_CURRENCY, { modern: true })),
   });
   if (status < 200 || status >= 300) {
     console.log(`  [order failed] ${entry.key}: HTTP ${status} — ${describeFailure(body)}`);
     return null;
   }
+
   const order = body as { id: string; links?: { rel: string; href: string }[] };
+
+// Print what PayPal actually said, in full, on the first order. Five attempts
+  // were spent inferring the cause from a generic web page; the create-order
+  // response is the one artefact nobody had actually read.
+  if (entry === SCENARIO[0]) {
+    console.log("\n  --- verbatim create-order response ---");
+    console.log(JSON.stringify(body, null, 2));
+    console.log("  --------------------------------------\n");
+  }
+
+  // Re-read it, so the state shown is PayPal's rather than our assumption.
+  const reread = await call(`/v2/checkout/orders/${order.id}`);
+  const r = reread.body as {
+    status?: string;
+    purchase_units?: { amount?: { currency_code?: string; value?: string } }[];
+  };
+  const unit = r?.purchase_units?.[0];
+  console.log(
+    `  [order] ${entry.key}  ${order.id}  status=${String(r?.status ?? "?")} ` +
+      `${String(unit?.amount?.value ?? "?")} ${String(unit?.amount?.currency_code ?? "?")}`,
+  );
+
   const approveUrl =
-    order.links?.find((l) => l.rel === "payer-action" || l.rel === "approve")?.href ?? "";
+    order.links?.find((l) => l.rel === "payer-action")?.href ??
+    order.links?.find((l) => l.rel === "approve")?.href ??
+    "";
   return { key: entry.key, id: order.id, approveUrl };
 }
 

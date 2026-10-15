@@ -43,11 +43,6 @@ export type OrderEntry = {
 
 export type OrderPayload = {
   intent: "CAPTURE";
-  application_context: {
-    brand_name: string;
-    user_action: "PAY_NOW";
-    landing_page: "LOGIN";
-  };
   purchase_units: {
     reference_id: string;
     invoice_id: string;
@@ -70,6 +65,25 @@ export type OrderPayload = {
       category: OrderItemCategory;
     }[];
   }[];
+  /**
+   * Present only when `modern: true`.
+   *
+   * Every field of the old top-level `application_context` — brand_name,
+   * landing_page, user_action, locale — was **deprecated in Orders v2.9** and
+   * moved under `payment_source.paypal.experience_context`. Setting the
+   * deprecated form is how the first approval attempt produced an approval link
+   * with an empty `merchantName=` and PayPal's generic error page.
+   */
+  payment_source?: {
+    paypal: {
+      experience_context: {
+        brand_name: string;
+        landing_page: "LOGIN" | "BILLING";
+        user_action: "PAY_NOW";
+        shipping_preference: "NO_SHIPPING";
+      };
+    };
+  };
 };
 
 /**
@@ -88,6 +102,7 @@ export type OrderPayload = {
 export function buildOrderPayload(
   entry: OrderEntry,
   currency: Currency = DEFAULT_CURRENCY,
+  options: { readonly modern?: boolean } = {},
 ): OrderPayload {
   const lines: OrderLine[] = [
     { label: entry.label, amountCents: entry.amountCents },
@@ -99,14 +114,6 @@ export function buildOrderPayload(
 
   return {
     intent: "CAPTURE",
-    // Not required by the schema, but the hosted checkout renders far more
-    // reliably with an explicit brand and a direct action. Its absence is one
-    // of the reasons a valid order can still fail at the approval screen.
-    application_context: {
-      brand_name: "spendless",
-      user_action: "PAY_NOW",
-      landing_page: "LOGIN",
-    },
     purchase_units: [
       {
         reference_id: entry.key,
@@ -131,5 +138,19 @@ export function buildOrderPayload(
         })),
       },
     ],
+    ...(options.modern === true
+      ? {
+          payment_source: {
+            paypal: {
+              experience_context: {
+                brand_name: "spendless",
+                landing_page: "LOGIN" as const,
+                user_action: "PAY_NOW" as const,
+                shipping_preference: "NO_SHIPPING" as const,
+              },
+            },
+          },
+        }
+      : {}),
   };
 }
