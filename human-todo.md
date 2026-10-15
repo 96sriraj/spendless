@@ -119,6 +119,28 @@
   - One click, no checkout flow, no cookies, no country problem. **It carries no `invoice_id`**, so it
     proves the read path sees real payments but proves nothing about identity — do not mistake it for
     the S-2-live answer.
+- [ ] **H1-05e** `[dashboard, ~10 min]` **RESET the sandbox account pair.** The current pair cannot
+  move money in either direction.
+  - Three independent symptoms, one cause:
+    1. Hosted approval fails with `UNSUPPORTED_PAYEE_CURRENCY` (decoded from the page URL).
+    2. Sending money personal -> business fails with *"Your account is not supported for this action."*
+    3. Order creation works fine, so the API and the app are healthy.
+  - (2) is the tell: a **buyer** account that cannot send money is not a fully
+    initialised sandbox account. Combined with (1), the app is most likely attached
+    to the **personal** account, which cannot receive payments at all — which is
+    exactly what `UNSUPPORTED_PAYEE_CURRENCY` means.
+  - **The reset, in order:**
+    1. Testing Tools → Sandbox Accounts → **Create Account → Business, country United States.**
+    2. Create Account → **Personal, country United States.**
+    3. Apps & Credentials → Sandbox → **Create a NEW app** and attach it to the new
+       **Business** account.
+    4. Enable **Transaction Search** on that new app (H1-03).
+    5. Use the new client ID + secret for `bun run seed`.
+  - This is a fresh, coherent US/USD pair. Everything we tried assumed the existing
+    India-based pair could take USD, and three separate signals say it cannot.
+  - **Do not spend more than ~10 minutes on this.** If it does not work, take the
+    CSV-only decision instead — see the decision block below.
+
 - [ ] **H1-06** `[sandbox]` Force a dispute on a real sandbox payment → expect a dispute visible via the API
   - ⚠️ **Deprioritised, and partly refuted.** All three MCP dispute tools call `/v1/customer/disputes`
     — the **buyer's** namespace — and `accept-claim` pays money *back to the customer*.
@@ -200,6 +222,25 @@
   - **Devpost locks the submission after Nov 12.** Do not plan to submit on the 12th.
 
 ---
+
+## 🔴 Decision needed — 3.8 days to the kill switch
+
+> The PayPal sandbox account pair cannot move money in either direction. Every remaining
+> unblocked build item depends on either that working, or on an explicit decision not to.
+> **This needs the founder, not the agent.**
+
+| Option | What you get | What you lose |
+>|---|---|---|
+>| **A. Reset the sandbox accounts** (H1-05e, ~10 min) | Everything as planned: merchant-side demo, real refunds, real cancellations, run log against live PayPal data. | Nothing, if it works. Three symptoms say the current pair is not fit for purpose. |
+>| **B. CSV-only pivot** | The full product, already built and tested: real AI reasoning over real PayPal export data, run log, e2e demo. No credential needed. | The merchant-side PayPal execution story. A judge checking "did they integrate PayPal?" sees a CSV parser. |
+
+> **Recommendation: give A one focused attempt (~10 min), then take B without guilt.** The
+> detector graph, the run log, the agent loop and the whole test suite are binding-C agnostic —
+> only the adapter binding changes. B is a smaller demo, not a broken one.
+>
+> `AGENTS.md` is explicit that the dispute lane is to be *cut, never faked*. The same applies
+> here: better a smaller honest demo than a large one resting on a sandbox that will not move
+> money.
 
 ## Decisions needed from the founder
 
