@@ -41,35 +41,37 @@ const SANDBOX = SANDBOX_BASE_URL;
 /**
  * Currency the orders are charged in.
  *
- * It has to match what the PAYEE's account holds. On 2026-10-16 the hosted
- * approval screen rejected a USD order with `UNSUPPORTED_PAYEE_CURRENCY`:
+ * Settled by evidence, not by documentation. The spike read
+ * `transaction_amount.currency_code` off a real transaction in this account:
+ * **it settles in USD**, and USD order creation was accepted on the first run.
  *
- *   code=VU5TVVBQT1JURURfUEFZRUVfQ1VSUkVOQ1k=
- *     = "UNSUPPORTED_PAYEE_CURRENCY"
+ * Two wrong diagnoses got here, both recorded because each cost a cycle:
  *
- * because the sandbox merchant account is India-based and settles in INR.
- * That error surfaces on the web screen, not on any API response, so it reads
- * like a broken page rather than a currency mismatch.
+ *   1. "Set the buyer account's country to US." No. Country is fixed at sandbox
+ *      account creation and was never the cause.
+ *   2. "Charge in INR, the account is India-based." No. Order creation rejects
+ *      INR outright here while accepting 17 other codes, and the account
+ *      settles in USD.
  *
- * Default INR to match the account. Override with SEED_CURRENCY=USD once the
- * merchant account is USD-based — and note that in the script's output, since
- * a default that is wrong in one direction is wrong silently.
+ * So what was UNSUPPORTED_PAYEE_CURRENCY? That run predated
+ * `application_context`, and its approval link came back with an empty
+ * `merchantName=`. USD *plus* `application_context` had not been tried.
+ *
+ * Override with SEED_CURRENCY only if this account ever changes.
  */
-const SEED_CURRENCY = (process.env["SEED_CURRENCY"] ?? "INR") as Currency;
+const SEED_CURRENCY = (process.env["SEED_CURRENCY"] ?? "USD") as Currency;
 
 /**
  * Identities the detectors will key on. These strings are the whole trick.
  *
- * Amounts are in minor units and chosen to read as plausible INR prices
- * (₹649, ₹1,299, ₹119) because the default currency is INR. Set
- * SEED_CURRENCY=USD and they become $6.49 / $12.99 / $1.19 — cheap, but the
- * detectors only care that the three charges for one merchant are equal, and
- * a demo where "Netflix Premium" costs six rupees undermines itself.
+ * Amounts are minor units reading as plausible USD prices, because the account
+ * settles in USD. The detectors only care that the three charges for one
+ * merchant are equal; a demo where Netflix costs six dollars undermines itself.
  */
 const SCENARIO = [
-  { key: "sub-netflix", label: "Netflix", amountCents: 64_900 },
-  { key: "sub-adobe", label: "Adobe Creative Cloud", amountCents: 129_900 },
-  { key: "sub-spotify", label: "Spotify", amountCents: 11_900 },
+  { key: "sub-netflix", label: "Netflix", amountCents: 1_599 },
+  { key: "sub-adobe", label: "Adobe Creative Cloud", amountCents: 5_999 },
+  { key: "sub-spotify", label: "Spotify", amountCents: 1_199 },
 ] as const;
 
 type Created = { key: string; id: string; approveUrl: string };
@@ -258,12 +260,6 @@ if (method === "probe") {
 
 const created: Created[] = [];
 console.log(`spendless seed — method: ${method}  currency: ${SEED_CURRENCY}\n`);
-if (SEED_CURRENCY === "USD") {
-  console.log(
-    "  USD orders need a USD-based merchant account. A mismatch fails on the\n" +
-      "  approval screen as UNSUPPORTED_PAYEE_CURRENCY, not on the API call.\n",
-  );
-}
 
 for (const entry of SCENARIO) {
   const order = await createOrder(entry);
@@ -303,12 +299,12 @@ if (method === "transfer") {
   for (const [i, order] of created.entries()) {
     console.log(`  ${i + 1}. ${order.key}\n     ${order.approveUrl}`);
   }
-  console.log("\nBefore you open them - this is what breaks the hosted screen:");
-  console.log("  1. The BUYER sandbox account's country must be US. Non-US sandbox");
-  console.log("     accounts fail with exactly 'Things don't appear to be working'.");
-  console.log("  2. Sign in to sandbox.paypal.com as the buyer FIRST, same browser.");
-  console.log("  3. Allow third-party cookies; try a clean profile with no extensions.");
-  console.log("  4. These links are single-use. Do not reuse one from an earlier run.\n");
+  console.log("\nBefore you open them:");
+  console.log("  1. Sign in to sandbox.paypal.com as the BUYER first, same browser.");
+  console.log("  2. Allow third-party cookies; use a profile with no extensions.");
+  console.log("  3. These links are single-use. Do not reuse one from an earlier run.\n");
+  console.log("  If the screen fails again, capture the URL - the base64 `code=` in it");
+  console.log("  decodes to the real reason, and that is what unblocked this twice.\n");
   console.log("  If the screen still fails, that is a PayPal web checkout problem, not");
   console.log("  ours - the orders above are real and valid. Then try:");
   console.log("    bun run seed --method transfer");
