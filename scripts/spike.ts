@@ -14,8 +14,9 @@
 import { writeFileSync } from "node:fs";
 import { fieldInventory, findMerchantIdentity, IDENTITY_FIELDS, readTransactions } from "../src/adapters/inspect";
 import { chunkRange, mergeTransactions, PAYPAL_MAX_WINDOW_DAYS } from "../src/adapters/chunkRange";
+import { readOAuthToken, refreshAfterSeconds, SANDBOX_BASE_URL } from "../src/adapters/token";
 
-const SANDBOX = "https://api-m.sandbox.paypal.com";
+const SANDBOX = SANDBOX_BASE_URL;
 const DAY = 86_400_000;
 
 type Result = {
@@ -65,16 +66,88 @@ function describeError(body: unknown): string {
   return details.length > 0 ? `${message} (${details})` : message;
 }
 
+/**
+ * Get a token.
+ *
+ * Prefers an explicit PAYPAL_ACCESS_TOKEN. Otherwise mints one from the client
+ * credentials, which is what makes this a two-credential job rather than a
+ * token-management job — and the OAuth response carries `expires_in`, which is
+ * most of the answer to S-0-05 without waiting for anything.
+ */
+async function resolveToken(): Promise<string | null> {
+  const explicit = process.env["PAYPAL_ACCESS_TOKEN"];
+  if (explicit !== undefined && explicit.trim().length > 0) {
+    console.log("using PAYPAL_ACCESS_TOKEN from the environment");
+    return explicit;
+  }
+
+  const id = process.env["PAYPAL_CLIENT_ID"];
+  const secret = process.env["PAYPAL_CLIENT_SECRET"];
+  if (id === undefined || secret === undefined || id.length === 0 || secret.length === 0) {
+    return null;
+  }
+
+  console.log("minting a sandbox token from PAYPAL_CLIENT_ID / PAYPAL_CLIENT_SECRET…");
+  const basic = Buffer.from(`${id}:${secret}`, "utf8").toString("base64");
+  const response = await fetch(`${SANDBOX}/v1/oauth2/token`, {
+    method: "POST",
+    headers: {
+      Authorization: `Basic ${basic}`,
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: "grant_type=client_credentials",
+  });
+
+  const raw = await response.text();
+  let body: unknown;
+  try {
+    body = JSON.parse(raw);
+  } catch {
+    body = raw;
+  }
+
+  if (response.status !== 200) {
+    console.log(`\n[FAIL] OAuth returned HTTP ${response.status}`);
+    console.log(`  ${describeError(body)}`);
+    console.log("\n  Check the Client ID and Secret are the SANDBOX ones, not the live ones.");
+    return null;
+  }
+
+  const parsed = readOAuthToken(body);
+  if (parsed === null) {
+    console.log("\n[FAIL] OAuth succeeded but the response had no usable token/expiry.");
+    console.log(`  ${raw.slice(0, 300)}`);
+    return null;
+  }
+
+  // S-0-05, answered immediately: the server states the lifetime. The long
+  // measurement is a separate, opt-in run because it takes hours.
+  const hours = parsed.expiresInSeconds / 3600;
+  record(
+    "S-0-05",
+    "How long does the sandbox token actually last?",
+    hours > 9 ? "DOC-DRIFT" : "OK",
+    `OAuth response says expires_in=${parsed.expiresInSeconds}s (${hours.toFixed(1)}h).\n` +
+      `AGENTS.md documents 3-8h. Refresh at ${Math.floor(refreshAfterSeconds(parsed.expiresInSeconds) / 60)}m.\n` +
+      `This is what the SERVER claims; confirming it by waiting for a 401 is opt-in\n` +
+      `via SPIKE_MEASURE_TTL=1 and takes up to ${Math.ceil(hours)}h.`,
+  );
+
+  return parsed.accessToken;
+}
+
 async function main(): Promise<void> {
-  const token = process.env["PAYPAL_ACCESS_TOKEN"];
-  if (token === undefined || token.length === 0) {
-    console.log("PAYPAL_ACCESS_TOKEN is not set — nothing to probe.");
-    console.log("See human-todo.md H1-03/H1-04. This script needs H1-03 (Transaction");
-    console.log("Search enabled) or every read below returns a permission error.");
+  const token = await resolveToken();
+  if (token === null) {
+    console.log("\nNothing to probe. This script needs either:");
+    console.log("  PAYPAL_ACCESS_TOKEN, or");
+    console.log("  PAYPAL_CLIENT_ID + PAYPAL_CLIENT_SECRET");
+    console.log("\nSee human-todo.md H1-03 (Transaction Search must be enabled on the app,");
+    console.log("or every read below returns a permission error) and H1-04.");
     process.exit(0);
   }
 
-  console.log("spendless spike — sandbox");
+  console.log("\nspendless spike — sandbox");
   console.log(`token: ${token.slice(0, 6)}…${token.slice(-4)} (length ${token.length})`);
 
   // ---- S-0-02 / S-0-03: is the account a business account with read access? --
@@ -214,21 +287,25 @@ async function main(): Promise<void> {
     );
   }
 
-  // ---- S-0-05: token TTL, from the live clock ------------------------------
-  {
+  // ---- S-0-05: the measured TTL, only if explicitly asked ----------------
+  // Opt-in because it sleeps for hours. Blocking every other probe behind it
+  // would mean the answers nobody is waiting for delay the ones they are.
+  if (process.env["SPIKE_MEASURE_TTL"] === "1") {
+    console.log("\nSPIKE_MEASURE_TTL=1 — probing until the token 401s. This takes hours.");
     const issuedAt = Date.now();
     const ttlHours = await measureTokenTtl(token, issuedAt);
-    if (ttlHours === null) {
-      record("S-0-05", "How long does the sandbox token actually last?", "UNKNOWN", "token already expired");
-    } else {
-      record(
-        "S-0-05",
-        "How long does the sandbox token actually last?",
-        ttlHours > 9 ? "LONG" : "OK",
-        `${ttlHours.toFixed(2)}h observed. AGENTS.md says 3–8h; the OAuth response ` +
-          `says expires_in. Refresh at 80% of this, never discover it mid-demo.`,
-      );
-    }
+    record(
+      "S-0-05",
+      "How long does the sandbox token actually last?",
+      ttlHours === null ? "UNKNOWN" : "MEASURED",
+      ttlHours === null
+        ? "token expired before it could be measured"
+        : `${ttlHours.toFixed(2)}h observed against the live clock.`,
+    );
+  } else {
+    console.log(
+      "\nskipping the long token-TTL measurement (set SPIKE_MEASURE_TTL=1 to run it; it takes hours)",
+    );
   }
 
   const report = [
