@@ -306,19 +306,19 @@ if (created.length === 0) {
 
 if (method === "transfer") {
   // No order is created in transfer mode: a transfer has no purchase unit to
-  // hang an invoice_id on. Orders are cancelled so they cannot be mistaken for
-  // something that was paid.
-  for (const order of created) {
-    await call(`/v2/checkout/orders/${order.id}`, { method: "PATCH", body: JSON.stringify([{ op: "replace", path: "/intent", value: "CAPTURE" }]) }).catch(() => undefined);
-  }
-
-  console.log("\n\nTRANSFER MODE — orders above were created but NOT fundable this way.");
+  // hang an invoice_id on. Unapproved CREATED orders sitting in the account
+  // are noise, and they are exactly the sort of thing that later reads as a
+  // real payment when someone goes looking.
+  console.log("\n\nTRANSFER MODE — no orders created, and none needed.");
   console.log("A plain transfer carries no invoice_id or custom_id, so it cannot answer");
-  console.log("S-2-live. What it does prove is that the read path sees real payments.\n");
-  console.log("Sign in as the sandbox BUYER, open this, and send money to your");
-  console.log("sandbox BUSINESS account's email:\n");
+  console.log("S-2-live. What it DOES prove is that the read path sees real payments,");
+  console.log("which is what everything downstream is built on.\n");
+  console.log("Sign in as the sandbox BUYER at https://www.sandbox.paypal.com, then");
+  console.log("open this and send money to your sandbox BUSINESS account's email:\n");
   console.log(`  ${transferLink("<business-account-email>", 1599)}\n`);
-  console.log("Then re-run `bun run spike`.");
+  console.log("Send a second one with a different amount if you want more rows.");
+  console.log("Then wait ~30s and run `bun run spike`.");
+  process.exit(0);
 } else {
   console.log(`\n\n${created.length} orders created. Approve each one in a browser:\n`);
   for (const [i, order] of created.entries()) {
@@ -328,10 +328,11 @@ if (method === "transfer") {
   console.log("  1. Sign in to sandbox.paypal.com as the BUYER first, same browser.");
   console.log("  2. Allow third-party cookies; use a profile with no extensions.");
   console.log("  3. These links are single-use. Do not reuse one from an earlier run.\n");
-  console.log("  If the screen fails again, capture the URL - the base64 `code=` in it");
-  console.log("  decodes to the real reason, and that is what unblocked this twice.\n");
-  console.log("  If the screen still fails, that is a PayPal web checkout problem, not");
-  console.log("  ours - the orders above are real and valid. Then try:");
+  console.log("  If the screen fails again: the base64 `code=` in the URL decodes to");
+  console.log("  the real reason. It has read UNSUPPORTED_PAYEE_CURRENCY every time,");
+  console.log("  which points at the PAYEE account's own setup rather than at anything");
+  console.log("  we send - check which sandbox account the app is attached to.\n");
+  console.log("  Or get a real payment into the account the easy way:");
   console.log("    bun run seed --method transfer");
 }
 
