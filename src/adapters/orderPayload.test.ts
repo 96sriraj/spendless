@@ -35,6 +35,71 @@ describe("orderPayload — item category", () => {
   });
 });
 
+describe("orderPayload — the amount breakdown the schema demands", () => {
+  // The second live failure: "ITEM_TOTAL_REQUIRED - If item details are
+  // specified (items.unit_amount and items.quantity) corresponding
+  // amount.breakdown.item_total is required."
+  it("should send item_total whenever items carry a unit_amount", () => {
+    const unit = buildOrderPayload(NETFLIX).purchase_units[0];
+    expect(unit?.amount.breakdown.item_total.value).toBeDefined();
+    expect(unit?.amount.breakdown.item_total.currency_code).toBe("USD");
+  });
+
+  // "Must equal the sum of (items[].unit_amount * items[].quantity) for all
+  // items." A mismatch is a 422 that reads as malformed rather than arithmetic.
+  it("should make item_total equal the sum of every line", () => {
+    const unit = buildOrderPayload({
+      key: "sub-bundle",
+      label: "Netflix",
+      amountCents: 1_599,
+      additionalLines: [{ label: "Add-ons", amountCents: 401 }],
+    }).purchase_units[0];
+
+    const sum = (unit?.items ?? []).reduce((total, item) => {
+      const cents = Number(item.unit_amount.value.replace(".", "")) * Number(item.quantity);
+      return total + cents;
+    }, 0);
+
+    expect(unit?.amount.breakdown.item_total.value).toBe("20.00");
+    expect(unit?.amount.value).toBe(unit?.amount.breakdown.item_total.value);
+    expect(sum).toBe(2_000);
+  });
+
+  it("should keep amount.value and item_total in step for a single line", () => {
+    const unit = buildOrderPayload(NETFLIX).purchase_units[0];
+    expect(unit?.amount.value).toBe("15.99");
+    expect(unit?.amount.breakdown.item_total.value).toBe(unit?.amount.value);
+  });
+
+  it("should add one item per line", () => {
+    const unit = buildOrderPayload({
+      key: "sub-bundle",
+      label: "Netflix",
+      amountCents: 1_599,
+      additionalLines: [{ label: "Add-ons", amountCents: 401 }],
+    }).purchase_units[0];
+    expect(unit?.items).toHaveLength(2);
+    expect(unit?.items.map((i) => i.name)).toEqual(["Netflix", "Add-ons"]);
+  });
+
+  it("should give every line the subscription category", () => {
+    const unit = buildOrderPayload({
+      key: "sub-bundle",
+      label: "Netflix",
+      amountCents: 1_599,
+      additionalLines: [{ label: "Add-ons", amountCents: 401 }],
+    }).purchase_units[0];
+    for (const item of unit?.items ?? []) {
+      expect(item.category).toBe("DIGITAL_GOODS");
+    }
+  });
+
+  it("should honour an explicit currency in the breakdown too", () => {
+    const unit = buildOrderPayload(NETFLIX, "INR").purchase_units[0];
+    expect(unit?.amount.breakdown.item_total.currency_code).toBe("INR");
+  });
+});
+
 describe("orderPayload — shape", () => {
   it("should ask for a CAPTURE", () => {
     expect(buildOrderPayload(NETFLIX).intent).toBe("CAPTURE");
