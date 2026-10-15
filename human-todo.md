@@ -84,16 +84,28 @@
   - The `expires_in` in the OAuth response answers **S-0-05** immediately (9 hours, against the 3–8h
     the docs claim). Measuring it for real takes hours and is opt-in via `SPIKE_MEASURE_TTL=1`.
   - Once a read works, the agent can enable `paypal-local` (`todo.md` S0-01).
-- [ ] **H1-05** `[sandbox]` Create a **second personal sandbox account** (buyer) → expect it can pay the business account's subscription
-  - Needed for S-2 and S-4: create plan → subscription → **capture with the personal account** → re-query.
-  - Capture with a personal account is the exact shape that proves or refutes merchant-side read.
+- [ ] **H1-05** `[sandbox]` **You need the sandbox BUYER account** → expect you can log into it at
+  `https://www.sandbox.paypal.com` and see its balance
+  - Dashboard → **Testing Tools → Sandbox Accounts**. Note the **business** account's email/password and
+    the **personal/buyer** account's email/password separately. They are two different logins.
+  - **This is now the only thing blocking the demo.** The sandbox has **zero payments** — one $5,000
+    account adjustment (T1900) and nothing else. There is no data to classify until you approve a real
+    payment.
+- [ ] **H1-05b** `[shell]` `bun run seed` → approve the printed URL **as the buyer**, then
+  `bun run seed --capture` → expect one settled payment in the sandbox account
+  - Sign in as the **buyer** at `sandbox.paypal.com`, open the printed URL, and complete the payment.
+  - PayPal settles asynchronously — wait ~30s after capture before re-running `bun run spike`.
+  - This is the **kill-switch test.** It answers: does a merchant-authored `invoice_id` / `custom_id`
+    come back in Transaction Search? If nothing survives, the detector graph has no merchant input
+    from any PayPal API and the demo must be reframed. See `ARCHITECTURE.md` §11c.
 - [ ] **H1-06** `[sandbox]` Force a dispute on a real sandbox payment → expect a dispute visible via the API
-  - ⚠️ **Deprioritised by §11a research, and possibly unnecessary.** All three MCP dispute tools call
-    `/v1/customer/disputes` — the **buyer's** namespace — and `accept-claim` pays money *back to the
-    customer*. It is very likely merchant credentials cannot reach it at all.
-  - **`bun run spike` tests this directly** (S-0-04). Run it before spending time here. If it 401s or
-    403s, the dispute lane is not buildable on these credentials: cut it from the demo (`AGENTS.md`
-    says cut, never fake) and refund + cancel carry the "it acts" claim alone.
+  - ⚠️ **Deprioritised, and partly refuted.** All three MCP dispute tools call `/v1/customer/disputes`
+    — the **buyer's** namespace — and `accept-claim` pays money *back to the customer*.
+  - **But the live probe returned HTTP 200**, so my prediction that merchant credentials would be
+    rejected was wrong. Reachable is still not usable: it is the buyer's namespace, and it is not yet
+    shown to list disputes *raised against* the merchant.
+  - **Only spend time here after H1-05b succeeds.** If the seed does not produce a usable payment, the
+    dispute lane is a distraction. Refund + cancel carry the "it acts" claim on their own.
 - [ ] **H1-07** `[decision]` Confirm the demo **persona**: merchant-side is the only executable binding. Is the product framed as "protect this merchant's revenue" or "here's what your data shows you, cancellation happens merchant-side"? → expect a written one-line framing
   - **Needed by Oct 18.** The agent rewrites the README in P8-05; your framing decides what it says.
   - ⚠️ **New constraint from §11a:** no PayPal API returns a *merchant* name to anyone. In the
