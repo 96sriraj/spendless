@@ -58,23 +58,32 @@
   - **Do this next.** It is the single permission the whole read path depends on, and it is easy to
     miss. Without it every read returns a permission error, which reads exactly like "sandbox is
     broken" and costs an afternoon.
-- [ ] **H1-04** **Get a sandbox access token** → expect `$env:PAYPAL_ACCESS_TOKEN` set in your shell
-  - You already have client ID + secret, so mint it with OAuth rather than using the dashboard's
-    export button — that also surfaces `expires_in`, which answers S-0-05 for free:
+- [ ] **H1-04** **Put the two sandbox credentials in your shell, then run `bun run spike`**
+  - **You do not need to mint or manage a token.** `spike.ts` does that itself. Set two variables
+    and run one command:
 
     ```powershell
-    $cred = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("$env:PAYPAL_CLIENT_ID`:$env:PAYPAL_CLIENT_SECRET"))
-    $tok  = Invoke-RestMethod -Method Post -Uri "https://api-m.sandbox.paypal.com/v1/oauth2/token" `
-             -Headers @{Authorization="Basic $cred"} -Body @{grant_type="client_credentials"}
-    $env:PAYPAL_ACCESS_TOKEN = $tok.access_token
-    "expires_in: $($tok.expires_in)s"
+    cd D:\Github\spendless
+    $env:PAYPAL_CLIENT_ID     = "paste-your-client-id-here"
+    $env:PAYPAL_CLIENT_SECRET = "paste-your-client-secret-here"
+    bun run spike
     ```
 
-  - **Never paste the client secret or the token into a chat, a doc, or a commit.** The agent reads
-    them from the environment; that is the only supported path.
-  - Then run `bun run spike` and paste back **`spike-result.md`** — it contains no credentials, only
-    verdicts and field names.
-  - Once it is set, the agent can enable `paypal-local` (`todo.md` S0-01).
+  - Prefer these over typing the secret inline — a value typed into a command lands in your
+    PowerShell history file in plaintext:
+
+    ```powershell
+    $env:PAYPAL_CLIENT_ID     = Read-Host "Client ID"
+    $sec = Read-Host "Client Secret" -AsSecureString
+    $env:PAYPAL_CLIENT_SECRET = [Net.NetworkCredential]::new("", $sec).Password
+    ```
+
+  - Env vars die when the shell closes. That is fine — re-run the two lines in a new window, and
+    never persist the secret with `setx`.
+  - Then paste back **`spike-result.md`**. It contains verdicts and field names only, no credentials.
+  - The `expires_in` in the OAuth response answers **S-0-05** immediately (9 hours, against the 3–8h
+    the docs claim). Measuring it for real takes hours and is opt-in via `SPIKE_MEASURE_TTL=1`.
+  - Once a read works, the agent can enable `paypal-local` (`todo.md` S0-01).
 - [ ] **H1-05** `[sandbox]` Create a **second personal sandbox account** (buyer) → expect it can pay the business account's subscription
   - Needed for S-2 and S-4: create plan → subscription → **capture with the personal account** → re-query.
   - Capture with a personal account is the exact shape that proves or refutes merchant-side read.
