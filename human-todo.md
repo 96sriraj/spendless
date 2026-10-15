@@ -22,39 +22,78 @@
 | Oct 13–19 | H3 (Cloudflare account) available early | Phases 1–5 (core → adapter → seed → run log → agent) | Core agent works end-to-end locally |
 | **Oct 20** | 🔴 **Kill-switch check** | Phases 6–7 (action layer → execution) | **Real PayPal call, or drop it** |
 | Oct 20–26 | H4 (repo public) · decisions | Phase 7–8 (UI surface, deploy) | Demo runs on a free subdomain |
+
+> ## ⚠️ Oct 16 — schedule slip, stated plainly
+>
+> **The kill switch is Oct 20. Four days out.**
+>
+> H1-01 and H1-02 landed on Oct 16, late. Phases 1–2 are complete and green (357 tests), and the
+> adapter ports plus the CSV adapter are done, so the work is staged and waiting on one token —
+> but **no real PayPal call has been made yet**, and the kill-switch condition is precisely "a
+> real PayPal call works end to end".
+>
+> **The next four hours matter more than the next four days.** `bun run spike` takes minutes once
+> `PAYPAL_ACCESS_TOKEN` is set, and it answers the questions that decide whether the rest of the
+> plan survives: whether the sandbox reads transactions at all, whether merchant-authored identity
+> round-trips, and whether the dispute lane exists.
+>
+> If Oct 17 passes with no token, the honest move is to **move the kill switch** and re-plan against
+> the CSV-only path, which is fully built and needs no PayPal credential at all.
 | Oct 27–Nov 2 | H5 (Cloudflare deploy) · full rehearsal | Phase 8 (deploy + harden) | Deployed, rehearsable, no cold-start breakage |
 | Nov 3–8 | 🔴 H6 (record the video) · H7 (Devpost text) | Phase 9 (submission support) | Video <3 min, submission drafted |
 | Nov 9–11 | 🔴 **Submit early** | Bugfix only | Devpost locks Nov 12 |
 
 ---
 
-## H1 — PayPal: accounts and credentials — Day 1 · 🔴 BLOCKS THE SPIKE
+## H1 — PayPal: accounts and credentials — Day 1 · 🔴 MOSTLY DONE
 
-> **Everything is blocked on this.** Without a business sandbox account and an exported access
-> token there is no S-1, no S-2, and no Phase 0. Start here, before anything else.
+> **H1-01 and H1-02 are done.** The remaining blocker is the token. Everything the agent lane needs
+> is one command away: `bun run spike` answers S-0-02/03, S-2-live, S-0-04, S-0-04b and S-0-05 and
+> writes `spike-result.md`.
 
-- [ ] **H1-01** `[developer.paypal.com] Create a PayPal **Business** developer account** → expect the Developer Dashboard shows your sandbox credentials
-  - **Business, not personal.** ARCHITECTURE.md §2: `list_transactions` wraps Transaction Search v1,
-    which requires a business account. A personal account cannot answer S-1 or S-2.
-  - If you already have one, verify sandbox is active and **skip**.
-- [ ] **H1-02** `[Developer Dashboard → Apps & Credentials → Sandbox]` Create the sandbox app → expect a **Client ID** and **Secret** on screen
-  - Record them in a password manager, **not** in this repo. No secrets in a committed file (`AGENTS.md`).
+- [x] **H1-01** `[developer.paypal.com] Create a PayPal **Business** developer account` → **DONE Oct 16.** Business developer account exists.
+- [x] **H1-02** `[Developer Dashboard → Apps & Credentials → Sandbox]` Create the sandbox app → **DONE Oct 16.** Client ID and secret held.
+  - In a password manager, **not** in this repo. No secrets in a committed file (`AGENTS.md`).
 - [ ] **H1-03** `[My Apps → Transaction Search]` **Enable the Transaction Search permission toggle** on the sandbox app → expect the toggle visibly on
-  - This is the single permission the whole read path depends on. Verify it is actually on.
-- [ ] **H1-04** `[Dashboard]` Export a **sandbox access token** for the app → expect `PAYPAL_ACCESS_TOKEN` exported into your shell for the Spike
-  - **Tokens live 3–8 hours.** Refresh proactively; never discover expiry mid-demo.
-  - Agent enables the `paypal-local` MCP server once this exists (`todo.md` S0-01).
-  - Never paste the token into a chat, a doc, or a commit.
+  - **Do this next.** It is the single permission the whole read path depends on, and it is easy to
+    miss. Without it every read returns a permission error, which reads exactly like "sandbox is
+    broken" and costs an afternoon.
+- [ ] **H1-04** **Get a sandbox access token** → expect `$env:PAYPAL_ACCESS_TOKEN` set in your shell
+  - You already have client ID + secret, so mint it with OAuth rather than using the dashboard's
+    export button — that also surfaces `expires_in`, which answers S-0-05 for free:
+
+    ```powershell
+    $cred = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("$env:PAYPAL_CLIENT_ID`:$env:PAYPAL_CLIENT_SECRET"))
+    $tok  = Invoke-RestMethod -Method Post -Uri "https://api-m.sandbox.paypal.com/v1/oauth2/token" `
+             -Headers @{Authorization="Basic $cred"} -Body @{grant_type="client_credentials"}
+    $env:PAYPAL_ACCESS_TOKEN = $tok.access_token
+    "expires_in: $($tok.expires_in)s"
+    ```
+
+  - **Never paste the client secret or the token into a chat, a doc, or a commit.** The agent reads
+    them from the environment; that is the only supported path.
+  - Then run `bun run spike` and paste back **`spike-result.md`** — it contains no credentials, only
+    verdicts and field names.
+  - Once it is set, the agent can enable `paypal-local` (`todo.md` S0-01).
 - [ ] **H1-05** `[sandbox]` Create a **second personal sandbox account** (buyer) → expect it can pay the business account's subscription
   - Needed for S-2 and S-4: create plan → subscription → **capture with the personal account** → re-query.
   - Capture with a personal account is the exact shape that proves or refutes merchant-side read.
 - [ ] **H1-06** `[sandbox]` Force a dispute on a real sandbox payment → expect a dispute visible via the API
-  - `/v1/customer/disputes/{id}/adjudicate` and `/require-evidence` are **sandbox-only** endpoints.
-    If a dispute cannot be created, the agent's dispute-resolve demo cannot be rehearsed — find that out now, not in November.
+  - ⚠️ **Deprioritised by §11a research, and possibly unnecessary.** All three MCP dispute tools call
+    `/v1/customer/disputes` — the **buyer's** namespace — and `accept-claim` pays money *back to the
+    customer*. It is very likely merchant credentials cannot reach it at all.
+  - **`bun run spike` tests this directly** (S-0-04). Run it before spending time here. If it 401s or
+    403s, the dispute lane is not buildable on these credentials: cut it from the demo (`AGENTS.md`
+    says cut, never fake) and refund + cancel carry the "it acts" claim alone.
 - [ ] **H1-07** `[decision]` Confirm the demo **persona**: merchant-side is the only executable binding. Is the product framed as "protect this merchant's revenue" or "here's what your data shows you, cancellation happens merchant-side"? → expect a written one-line framing
-  - **Do not leave the README implying a buyer can refund their own charge.** It is not buildable
-    (`AGENTS.md`, binding B). The agent rewrites the README in P8-05; your framing decides what it says.
-  - A merchant persona is the honest, fully-executable option and the one the MCP tool surface supports.
+  - **Needed by Oct 18.** The agent rewrites the README in P8-05; your framing decides what it says.
+  - ⚠️ **New constraint from §11a:** no PayPal API returns a *merchant* name to anyone. In the
+    merchant-side framing the thing being protected is **this merchant's own subscription revenue**
+    — churn, failed renewals, chargebacks. The detectors key on identity spendless writes into
+    `invoice_id` at seed time, so the demo's subject is "your plans and your subscribers", not
+    "your Netflix". A framing built on the buyer cancelling their own services is not buildable here.
+  - The consumer narrative survives via the CSV adapter, which is done and does carry real payee
+    names.
 
 ## H2 — OpenRouter key — Day 1 · 🔴 BLOCKS PHASE 5
 
