@@ -12,3 +12,7 @@ coverage/
 *.log
 .DS_Store
 Thumbs.db
+
+# Written by `bun run spike`. It quotes live API responses, so it is evidence
+# to review and commit deliberately — never a file that lands in git by accident.
+spike-result.md
