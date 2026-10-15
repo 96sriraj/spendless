@@ -19,6 +19,7 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { readOAuthToken, SANDBOX_BASE_URL } from "../src/adapters/token";
 import { readTransactions } from "../src/adapters/inspect";
+import { buildOrderPayload } from "../src/adapters/orderPayload";
 
 const SANDBOX = SANDBOX_BASE_URL;
 
@@ -78,41 +79,13 @@ async function call(path: string, init: RequestInit = {}): Promise<unknown> {
 /**
  * Create one order per scenario entry.
  *
- * `invoice_id` and `custom_id` are set on every purchase unit, and `name` on the
- * item. These are the only merchant-authored fields Transaction Search will ever
- * hand back, so they are all written at once: if any of them survives the
- * round trip we have our identity, and the Spike is answered either way.
+ * The body comes from `buildOrderPayload`, which is tested against the
+ * published Orders v2 schema. This function only performs the request.
  */
 async function createOrder(entry: (typeof SCENARIO)[number]): Promise<Order> {
   const body = await call("/v2/checkout/orders", {
     method: "POST",
-    body: JSON.stringify({
-      intent: "CAPTURE",
-      purchase_units: [
-        {
-          reference_id: entry.key,
-          // The merchant-authored identity carriers.
-          invoice_id: entry.key,
-          custom_id: entry.key,
-          description: `${entry.label} monthly plan`,
-          amount: {
-            currency_code: "USD",
-            value: (entry.amountCents / 100).toFixed(2),
-          },
-          items: [
-            {
-              name: entry.label,
-              quantity: "1",
-              unit_amount: {
-                currency_code: "USD",
-                value: (entry.amountCents / 100).toFixed(2),
-              },
-              category: "SUBSCRIPTION",
-            },
-          ],
-        },
-      ],
-    }),
+    body: JSON.stringify(buildOrderPayload(entry)),
   });
 
   const order = body as { id: string; links?: { rel: string; href: string }[] };
@@ -142,6 +115,21 @@ if (!isCapture) {
     } catch (error) {
       console.log(`[FAILED ] ${entry.key}  ${(error as Error).message}`);
     }
+  }
+
+  // Stop here if nothing was created. The previous version fell through and
+  // printed "open each URL" with an empty list, which reads like success and
+  // would have sent you to the browser to approve nothing.
+  if (orders.length === 0) {
+    console.log("\nNo orders were created, so there is nothing to approve.");
+    console.log("The failures above are the reason — fix those and re-run.");
+    process.exit(1);
+  }
+  if (orders.length < SCENARIO.length) {
+    console.log(
+      `\nOnly ${orders.length}/${SCENARIO.length} orders were created. ` +
+        `One is enough to answer the identity question.`,
+    );
   }
 
   await writeFile(
