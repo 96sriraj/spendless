@@ -43,6 +43,11 @@ export type OrderEntry = {
 
 export type OrderPayload = {
   intent: "CAPTURE";
+  application_context: {
+    brand_name: string;
+    user_action: "PAY_NOW";
+    landing_page: "LOGIN";
+  };
   purchase_units: {
     reference_id: string;
     invoice_id: string;
@@ -94,6 +99,14 @@ export function buildOrderPayload(
 
   return {
     intent: "CAPTURE",
+    // Not required by the schema, but the hosted checkout renders far more
+    // reliably with an explicit brand and a direct action. Its absence is one
+    // of the reasons a valid order can still fail at the approval screen.
+    application_context: {
+      brand_name: "spendless",
+      user_action: "PAY_NOW",
+      landing_page: "LOGIN",
+    },
     purchase_units: [
       {
         reference_id: entry.key,

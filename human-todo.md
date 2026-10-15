@@ -91,13 +91,28 @@
   - **This is now the only thing blocking the demo.** The sandbox has **zero payments** — one $5,000
     account adjustment (T1900) and nothing else. There is no data to classify until you approve a real
     payment.
-- [ ] **H1-05b** `[shell]` `bun run seed` → approve the printed URL **as the buyer**, then
-  `bun run seed --capture` → expect one settled payment in the sandbox account
-  - Sign in as the **buyer** at `sandbox.paypal.com`, open the printed URL, and complete the payment.
-  - PayPal settles asynchronously — wait ~30s after capture before re-running `bun run spike`.
+- [ ] **H1-05b** `[shell]` `bun run seed` → expect **three payments completed, unattended** → then
+  `bun run spike`
+  - The default path funds each order with a sandbox test card over the API — `create →
+    confirm-payment-source → capture`. **No browser.** This is the path that matters with the kill
+    switch days away: unattended, reproducible, nothing to rehearse by hand.
   - This is the **kill-switch test.** It answers: does a merchant-authored `invoice_id` / `custom_id`
-    come back in Transaction Search? If nothing survives, the detector graph has no merchant input
-    from any PayPal API and the demo must be reframed. See `ARCHITECTURE.md` §11c.
+    come back in Transaction Search? Read the `key=` column the script prints. Anything other than
+    `unknown` means the identity survived. See `ARCHITECTURE.md` §11c.
+- [ ] **H1-05c** `[only if the browser fallback is needed]` Set the **buyer** sandbox account's
+  **country to US**, then `bun run seed --method browser` → expect the approval screen to load
+  - On 2026-10-16 the hosted approval screen failed with PayPal's generic *"Things don't appear to be
+    working at the moment"* **while the orders themselves were created successfully** — so that is a
+    web checkout failure, not an API one. Known causes, most likely first:
+    1. **The buyer sandbox account's country is not US.** The most commonly reported cause; a sandbox
+       account created under a non-US country fails exactly this way. Recreate the buyer with US.
+    2. **Not signed in** to `sandbox.paypal.com` in the same browser when the link is opened. Sign in
+       as the buyer *first*, then open the URL.
+    3. **Third-party cookies blocked**, or an ad/privacy extension. Try a clean browser profile.
+    4. The link is **single-use and expires** — create a fresh order rather than reusing an old URL.
+  - The order payload now sends `application_context` (brand, `PAY_NOW`, `LOGIN`), which makes the
+    hosted screen materially more reliable.
+  - **Prefer the card path.** It takes the browser off the demo's critical path entirely.
 - [ ] **H1-06** `[sandbox]` Force a dispute on a real sandbox payment → expect a dispute visible via the API
   - ⚠️ **Deprioritised, and partly refuted.** All three MCP dispute tools call `/v1/customer/disputes`
     — the **buyer's** namespace — and `accept-claim` pays money *back to the customer*.
