@@ -91,28 +91,35 @@
   - **This is now the only thing blocking the demo.** The sandbox has **zero payments** — one $5,000
     account adjustment (T1900) and nothing else. There is no data to classify until you approve a real
     payment.
-- [ ] **H1-05b** `[shell]` `bun run seed` → expect **three payments completed, unattended** → then
+- [ ] **H1-05b** `[browser]` `bun run seed` → approve the three orders **as the buyer** → then
   `bun run spike`
-  - The default path funds each order with a sandbox test card over the API — `create →
-    confirm-payment-source → capture`. **No browser.** This is the path that matters with the kill
-    switch days away: unattended, reproducible, nothing to rehearse by hand.
+  - ⚠️ **A browser is required and cannot be avoided.** Tried and abandoned on 2026-10-16: funding an
+    order over the API via `confirm-payment-source` with a sandbox test card returns
+    `422 UNPROCESSABLE_ENTITY`, because PayPal gates raw card data behind **PCI SAQ D** compliance.
+    The compliant route is a hosted-fields token, which is a browser anyway. Card funding code removed
+    rather than left in as a broken path. See `ARCHITECTURE.md` §11c.
+  - **Do H1-05c first.** The screen does not work until the buyer account's country is US.
   - This is the **kill-switch test.** It answers: does a merchant-authored `invoice_id` / `custom_id`
     come back in Transaction Search? Read the `key=` column the script prints. Anything other than
-    `unknown` means the identity survived. See `ARCHITECTURE.md` §11c.
-- [ ] **H1-05c** `[only if the browser fallback is needed]` Set the **buyer** sandbox account's
-  **country to US**, then `bun run seed --method browser` → expect the approval screen to load
-  - On 2026-10-16 the hosted approval screen failed with PayPal's generic *"Things don't appear to be
-    working at the moment"* **while the orders themselves were created successfully** — so that is a
-    web checkout failure, not an API one. Known causes, most likely first:
-    1. **The buyer sandbox account's country is not US.** The most commonly reported cause; a sandbox
-       account created under a non-US country fails exactly this way. Recreate the buyer with US.
+    `unknown` means the identity survived.
+- [ ] **H1-05c** `[dashboard, ~5 min]` Set the **buyer** sandbox account's **country to US**, then run
+  `bun run seed` and approve → expect the approval screen to render
+  - On 2026-10-16 the hosted approval screen returned *"Things don't appear to be working at the
+    moment"* **while the orders were created successfully** — a PayPal web checkout failure, not ours.
+    Known causes, most likely first:
+    1. **The buyer sandbox account's country is not US.** The most commonly reported cause. Edit the
+       existing buyer account to US, or delete it and create a new one with country = US.
     2. **Not signed in** to `sandbox.paypal.com` in the same browser when the link is opened. Sign in
        as the buyer *first*, then open the URL.
     3. **Third-party cookies blocked**, or an ad/privacy extension. Try a clean browser profile.
     4. The link is **single-use and expires** — create a fresh order rather than reusing an old URL.
   - The order payload now sends `application_context` (brand, `PAY_NOW`, `LOGIN`), which makes the
     hosted screen materially more reliable.
-  - **Prefer the card path.** It takes the browser off the demo's critical path entirely.
+- [ ] **H1-05d** `[fallback, only if H1-05c fails]` `bun run seed --method transfer` → click the printed
+  Send-money link → expect a real payment in the account
+  - One click, no checkout flow, no cookies, no country problem. **It carries no `invoice_id`**, so it
+    proves the read path sees real payments but proves nothing about identity — do not mistake it for
+    the S-2-live answer.
 - [ ] **H1-06** `[sandbox]` Force a dispute on a real sandbox payment → expect a dispute visible via the API
   - ⚠️ **Deprioritised, and partly refuted.** All three MCP dispute tools call `/v1/customer/disputes`
     — the **buyer's** namespace — and `accept-claim` pays money *back to the customer*.

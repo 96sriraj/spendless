@@ -515,12 +515,41 @@ with a test rather than an assumption.
 
 Creates real orders with `invoice_id`, `custom_id` and an item `name` all set on every purchase unit —
 all the merchant-authored carriers at once, so the round trip answers the question whichever one
-survives. One step is a browser flow by design: PayPal order approval. Then re-run `bun run spike` and
+survives. Then re-run `bun run spike` and read which field came back populated.
 read which field came back populated.
 
 **This is the kill-switch question.** If no merchant-authored identity survives, the detector graph has
 no merchant input from any PayPal API, and the demo must be reframed around recurrence and amounts
 alone — or the CSV-only path is taken.
+
+#### Card funding is not available — a finding, not a workaround
+
+The obvious way to take the browser out of the demo is to skip approval and fund the order
+directly: `POST /v2/checkout/orders/{id}/confirm-payment-source`. The schema allows a raw card, and
+PayPal's sandbox publishes test card numbers. **It does not work** — every call returns
+`422 UNPROCESSABLE_ENTITY` with no field detail. The reason is in the schema itself:
+
+> `card_request`: *"Passing card number, cvv and expiry directly via the API requires **PCI SAQ D**
+> compliance. PayPal offers a mechanism by which you do not have to take on the PCI SAQ D burden by
+> using hosted fields."*
+
+The compliant route is a `single_use_token`, produced by **hosted fields** — a browser again.
+`vault_id` needs the Payment Methods API, which is not exposed here.
+
+> **Consequence, now an owned constraint rather than a surprise four days from a deadline: order
+> approval is a browser flow and cannot be automated away.** `invoice_id` and `custom_id` exist only
+> on a merchant-initiated order, so they can only be proven by approving one.
+>
+> It also means **`bun run seed` is not rehearsalable unattended**, which is exactly what `H5-01`
+> depends on (rehearse cold, twice, once with the network dropped). Budget a human into the seed
+> loop, and keep a pre-recorded capture for the video.
+
+#### Browser fallback for the read path
+
+If the hosted screen stays broken, `--method transfer` prints a pre-filled sandbox **Send money**
+link: one click, no checkout flow, no cookies, no country dependency, and it produces a real payment.
+It carries **no `invoice_id`**, so it proves the read path sees payments without proving anything
+about identity. Worth having — but it must not be mistaken for the answer.
 
 ## 12. Build order
 

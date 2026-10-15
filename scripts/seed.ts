@@ -9,25 +9,30 @@
  * and the identity question could not be asked. This creates the first real
  * one with the identity fields written explicitly.
  *
- * Two funding paths, tried in this order:
+ * Two funding paths, because approval is a browser flow and that is a
+ * dependency we would rather not carry:
  *
- *   1. CARD (default). create -> confirm-payment-source -> capture, entirely
- *      over the API. Unattended, reproducible, no browser. This is the one that
- *      matters with the kill switch days away.
- *   2. BROWSER (`--method browser`). Falls back to the hosted approval screen.
- *      That screen failed on 2026-10-16 with PayPal's generic error while the
- *      order itself was created fine - see human-todo.md H1-05c for the known
- *      causes, the leading one being the buyer account's country.
+ *   1. APPROVE (default). Creates the orders, then you approve each one in a
+ *      browser as the sandbox buyer. This is the only path that writes a
+ *      merchant-authored identity, because `invoice_id` / `custom_id` exist
+ *      only on a merchant-initiated order. There is no API route around it:
+ *      Orders v2's `confirm-payment-source` accepts a raw card in the schema
+ *      but gates it behind PCI SAQ D compliance, and the sandbox refuses it
+ *      with a bare 422 (2026-10-16). A `single_use_token` would need hosted
+ *      fields, i.e. a browser again.
+ *   2. TRANSFER (`--method transfer`). Prints a pre-filled sandbox "Send
+ *      money" link instead. One click, no checkout flow, no cookies, no
+ *      country problem — but a plain transfer carries NO invoice_id or
+ *      custom_id, so it proves the read path sees real payments while proving
+ *      nothing about identity. A fallback, not the answer.
  *
- * Both paths write the same three merchant-authored identity carriers, so the
- * round-trip answer is the same either way.
+ * Both write through the same read path. See human-todo.md H1-05c.
  */
 
 import { writeFile } from "node:fs/promises";
 import { readOAuthToken, SANDBOX_BASE_URL } from "../src/adapters/token";
 import { readTransactions } from "../src/adapters/inspect";
 import { buildOrderPayload } from "../src/adapters/orderPayload";
-import { buildCardPaymentSource, SANDBOX_TEST_CARDS } from "../src/adapters/cardFunding";
 import { isPaymentEvent, exclusionReason } from "../src/core/eventCodes";
 
 const SANDBOX = SANDBOX_BASE_URL;
@@ -48,7 +53,9 @@ if (token === null) {
 }
 
 const statePath = "seed-state.json";
-const method = process.argv.includes("--method") ? "browser" : "card";
+const method = process.argv.includes("--method")
+  ? (process.argv[process.argv.indexOf("--method") + 1] ?? "approve")
+  : "approve";
 
 async function mintToken(): Promise<string | null> {
   const explicit = process.env["PAYPAL_ACCESS_TOKEN"];
@@ -118,27 +125,22 @@ async function createOrder(entry: (typeof SCENARIO)[number]): Promise<Created | 
   return { key: entry.key, id: order.id, approveUrl };
 }
 
-/** Fund an order with a sandbox test card. No browser involved. */
-async function fundAndCapture(orderId: string, cardIndex: number): Promise<string> {
-  const card = SANDBOX_TEST_CARDS[cardIndex % SANDBOX_TEST_CARDS.length]!;
-
-  const confirm = await call(`/v2/checkout/orders/${orderId}/confirm-payment-source`, {
-    method: "POST",
-    body: JSON.stringify(buildCardPaymentSource(card)),
+/**
+ * A pre-filled sandbox Send Money link.
+ *
+ * Not a substitute for approving an order - a transfer carries no
+ * `invoice_id` and no `custom_id`. It exists so the read path can be proven
+ * end to end even when the hosted checkout refuses to render: one click, no
+ * cookies, no country dependency.
+ */
+function transferLink(receiver: string, amountCents: number): string {
+  const params = new URLSearchParams({
+    email: receiver,
+    amount: (amountCents / 100).toFixed(2),
+    currencyCode: "USD",
+    note: "spendless seed",
   });
-  if (confirm.status < 200 || confirm.status >= 300) {
-    return `funding failed: HTTP ${confirm.status} — ${describeFailure(confirm.body)}`;
-  }
-
-  const capture = await call(`/v2/checkout/orders/${orderId}/capture`, {
-    method: "POST",
-    body: "{}",
-  });
-  if (capture.status < 200 || capture.status >= 300) {
-    return `capture failed: HTTP ${capture.status} — ${describeFailure(capture.body)}`;
-  }
-  const order = capture.body as { status?: string };
-  return order.status ?? "unknown";
+  return `https://www.sandbox.paypal.com/myaccount/send?${params.toString()}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -164,43 +166,35 @@ if (created.length === 0) {
   process.exit(1);
 }
 
-if (method === "browser") {
-  console.log(`\n\nApprove these in a browser, signed in as the sandbox BUYER account:`);
-  for (const [i, order] of created.entries()) {
-    console.log(`\n  ${i + 1}. ${order.key}\n     ${order.approveUrl}`);
+if (method === "transfer") {
+  // No order is created in transfer mode: a transfer has no purchase unit to
+  // hang an invoice_id on. Orders are cancelled so they cannot be mistaken for
+  // something that was paid.
+  for (const order of created) {
+    await call(`/v2/checkout/orders/${order.id}`, { method: "PATCH", body: JSON.stringify([{ op: "replace", path: "/intent", value: "CAPTURE" }]) }).catch(() => undefined);
   }
-  console.log(`\n  then:  bun run spike`);
-  console.log(
-    "\nIf the approval screen shows 'Things don't appear to be working', that is a\n" +
-      "hosted checkout failure, not an API one — see human-todo.md H1-05c.",
-  );
+
+  console.log("\n\nTRANSFER MODE — orders above were created but NOT fundable this way.");
+  console.log("A plain transfer carries no invoice_id or custom_id, so it cannot answer");
+  console.log("S-2-live. What it does prove is that the read path sees real payments.\n");
+  console.log("Sign in as the sandbox BUYER, open this, and send money to your");
+  console.log("sandbox BUSINESS account's email:\n");
+  console.log(`  ${transferLink("<business-account-email>", 1599)}\n`);
+  console.log("Then re-run `bun run spike`.");
 } else {
-  console.log("\n\nFunding with sandbox test cards — no browser needed.\n");
-  let succeeded = 0;
-
-  // Sequential on purpose: sandbox rate-limits aggressively, and three
-  // simultaneous captures is the fastest way to get a 429 instead of data.
-  for (const [index, order] of created.entries()) {
-    const result = await fundAndCapture(order.id, index);
-    if (result === "COMPLETED") {
-      succeeded += 1;
-      console.log(`  [captured] ${order.key}  ${order.id}  COMPLETED`);
-    } else {
-      console.log(`  [FAILED   ] ${order.key}  ${order.id}  ${result}`);
-    }
+  console.log(`\n\n${created.length} orders created. Approve each one in a browser:\n`);
+  for (const [i, order] of created.entries()) {
+    console.log(`  ${i + 1}. ${order.key}\n     ${order.approveUrl}`);
   }
-
-  console.log(`\n${succeeded}/${created.length} payments completed.`);
-  if (succeeded === 0) {
-    console.log(
-      "\nIf this says the card was declined or tokenisation failed, the sandbox may\n" +
-        "require a vaulted card for Orders v2. Re-run with the browser path:\n" +
-        "  bun run seed --method browser\n" +
-        "and see human-todo.md H1-05c first — the hosted checkout needs the buyer\n" +
-        "account's country set to US.",
-    );
-    process.exit(1);
-  }
+  console.log("\nBefore you open them - this is what breaks the hosted screen:");
+  console.log("  1. The BUYER sandbox account's country must be US. Non-US sandbox");
+  console.log("     accounts fail with exactly 'Things don't appear to be working'.");
+  console.log("  2. Sign in to sandbox.paypal.com as the buyer FIRST, same browser.");
+  console.log("  3. Allow third-party cookies; try a clean profile with no extensions.");
+  console.log("  4. These links are single-use. Do not reuse one from an earlier run.\n");
+  console.log("  If the screen still fails, that is a PayPal web checkout problem, not");
+  console.log("  ours - the orders above are real and valid. Then try:");
+  console.log("    bun run seed --method transfer");
 }
 
 // ---------------------------------------------------------------------------
