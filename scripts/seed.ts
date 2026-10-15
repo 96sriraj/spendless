@@ -181,21 +181,28 @@ async function createOrder(entry: (typeof SCENARIO)[number]): Promise<Created | 
 }
 
 /**
- * A pre-filled sandbox Send Money link.
+ * Instructions for making a sandbox transfer by hand.
  *
- * Not a substitute for approving an order - a transfer carries no
- * `invoice_id` and no `custom_id`. It exists so the read path can be proven
- * end to end even when the hosted checkout refuses to render: one click, no
- * cookies, no country dependency.
+ * The first version printed a deep link to
+ * `/myaccount/send?email=...&amount=...`, which returned 404 — PayPal has
+ * changed that route, and deep links are exactly the thing that breaks
+ * silently. The UI does not break, so the UI is what we instruct.
+ *
+ * Not a substitute for approving an order: a transfer carries no
+ * `invoice_id` and no `custom_id`. It exists so the read path can be proven end
+ * to end even when the hosted checkout refuses to render.
  */
-function transferLink(receiver: string, amountCents: number): string {
-  const params = new URLSearchParams({
-    email: receiver,
-    amount: (amountCents / 100).toFixed(2),
-    currencyCode: "USD",
-    note: "spendless seed",
-  });
-  return `https://www.sandbox.paypal.com/myaccount/send?${params.toString()}`;
+function transferInstructions(): string[] {
+  return [
+    "  1. Sign in at https://www.sandbox.paypal.com as the BUYER (personal)",
+    "     sandbox account.",
+    "  2. Choose Send & Request -> Send money.",
+    "  3. Recipient: your BUSINESS sandbox account's email.",
+    "  4. Amount: 15.99   Currency: USD",
+    "  5. Send. Then log in as the business account to confirm it arrived.",
+    "",
+    "  Repeat with 59.99 and 11.99 if you want more rows in Transaction Search.",
+  ];
 }
 
 // ---------------------------------------------------------------------------
@@ -313,11 +320,9 @@ if (method === "transfer") {
   console.log("A plain transfer carries no invoice_id or custom_id, so it cannot answer");
   console.log("S-2-live. What it DOES prove is that the read path sees real payments,");
   console.log("which is what everything downstream is built on.\n");
-  console.log("Sign in as the sandbox BUYER at https://www.sandbox.paypal.com, then");
-  console.log("open this and send money to your sandbox BUSINESS account's email:\n");
-  console.log(`  ${transferLink("<business-account-email>", 1599)}\n`);
-  console.log("Send a second one with a different amount if you want more rows.");
-  console.log("Then wait ~30s and run `bun run spike`.");
+  console.log("  Make the transfer by hand:");
+  for (const line of transferInstructions()) console.log(line);
+  console.log("\n  Then wait ~30s and run `bun run spike`.");
   process.exit(0);
 } else {
   console.log(`\n\n${created.length} orders created. Approve each one in a browser:\n`);
