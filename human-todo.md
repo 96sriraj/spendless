@@ -98,24 +98,23 @@
     `422 UNPROCESSABLE_ENTITY`, because PayPal gates raw card data behind **PCI SAQ D** compliance.
     The compliant route is a hosted-fields token, which is a browser anyway. Card funding code removed
     rather than left in as a broken path. See `ARCHITECTURE.md` §11c.
-  - **Do H1-05c first.** The screen does not work until the buyer account's country is US.
+  - H1-05c was a wrong diagnosis and is closed. The screen refused because of currency, now fixed.
   - This is the **kill-switch test.** It answers: does a merchant-authored `invoice_id` / `custom_id`
     come back in Transaction Search? Read the `key=` column the script prints. Anything other than
     `unknown` means the identity survived.
-- [ ] **H1-05c** `[dashboard, ~5 min]` Set the **buyer** sandbox account's **country to US**, then run
-  `bun run seed` and approve → expect the approval screen to render
-  - On 2026-10-16 the hosted approval screen returned *"Things don't appear to be working at the
-    moment"* **while the orders were created successfully** — a PayPal web checkout failure, not ours.
-    Known causes, most likely first:
-    1. **The buyer sandbox account's country is not US.** The most commonly reported cause. Edit the
-       existing buyer account to US, or delete it and create a new one with country = US.
-    2. **Not signed in** to `sandbox.paypal.com` in the same browser when the link is opened. Sign in
-       as the buyer *first*, then open the URL.
-    3. **Third-party cookies blocked**, or an ad/privacy extension. Try a clean browser profile.
-    4. The link is **single-use and expires** — create a fresh order rather than reusing an old URL.
-  - The order payload now sends `application_context` (brand, `PAY_NOW`, `LOGIN`), which makes the
-    hosted screen materially more reliable.
-- [ ] **H1-05d** `[fallback, only if H1-05c fails]` `bun run seed --method transfer` → click the printed
+- [x] **H1-05c** `[resolved 2026-10-16]` ~~Set the buyer account country to US~~ → **WRONG DIAGNOSIS.
+  The cause was `UNSUPPORTED_PAYEE_CURRENCY`: the sandbox **merchant** account is India-based and
+  settles in INR, and the orders were charged in USD.
+  - Proof: the hosted error page carries a base64 `code`. `VU5TVVBQT1JURURfUEFZRUVfQ1VSUkVOQ1k=`
+    decodes to `UNSUPPORTED_PAYEE_CURRENCY`.
+  - PayPal **accepted** the orders — only the payer screen refused. The mismatch surfaces on the web
+    page and never on an API response, so it looked like a broken checkout.
+  - **Country is not the cause** and cannot be changed anyway; it is fixed at account creation. A new
+    US buyer account would not have fixed this.
+  - Fixed by charging in the payee's currency. `bun run seed` now uses INR by default; override with
+    `SEED_CURRENCY=USD` if the merchant account is ever USD-based.
+
+- [ ] **H1-05d** `[fallback, only if approval still fails]` `bun run seed --method transfer` → click the printed
   Send-money link → expect a real payment in the account
   - One click, no checkout flow, no cookies, no country problem. **It carries no `invoice_id`**, so it
     proves the read path sees real payments but proves nothing about identity — do not mistake it for

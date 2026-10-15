@@ -544,6 +544,28 @@ The compliant route is a `single_use_token`, produced by **hosted fields** — a
 > depends on (rehearse cold, twice, once with the network dropped). Budget a human into the seed
 > loop, and keep a pre-recorded capture for the video.
 
+#### The hosted screen failure was a CURRENCY mismatch, not the account country
+
+The generic "Things don't appear to be working at the moment" page carries a base64 `code`. Decoded:
+
+```
+code=VU5TVVBQT1JURURfUEFZRUVfQ1VSUkVOQ1k=
+    = "UNSUPPORTED_PAYEE_CURRENCY"
+```
+
+The sandbox merchant account is **India-based and settles in INR**, and the orders were created in
+**USD**. PayPal accepted the orders without complaint and only refused at the payer's screen — the
+mismatch surfaces on the web page and never on an API response, which is why it read as a broken
+checkout rather than a bad currency.
+
+The earlier hypothesis — that the buyer account's country had to be US — was **wrong**. Country is
+fixed at sandbox-account creation and cannot be edited, but it is not the cause. The orders now charge
+in INR to match the payee, and the amounts read as plausible Indian prices rather than $6.49 Netflix.
+
+> Worth keeping: the currency in the product core is already threaded per row (`ARCHITECTURE.md` §5,
+> the `["USD","INR"]` pass). That decision, made for a different reason in a different week, is why
+> this was a one-line seed change rather than a refactor.
+
 #### Browser fallback for the read path
 
 If the hosted screen stays broken, `--method transfer` prints a pre-filled sandbox **Send money**

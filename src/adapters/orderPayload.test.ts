@@ -100,6 +100,27 @@ describe("orderPayload — the amount breakdown the schema demands", () => {
   });
 });
 
+describe("orderPayload — payee currency must match", () => {
+  // 2026-10-16: orders were created successfully in USD, then the hosted
+  // approval screen failed behind a generic error whose base64 `code`
+  // decodes to UNSUPPORTED_PAYEE_CURRENCY — the sandbox merchant account is
+  // India-based and settles in INR. The mismatch surfaces on the web screen and
+  // never on an API response, so it reads like a broken page rather than a bad
+  // currency. Hence: every money field carries the same explicit currency.
+  it("should carry the requested currency on every money field", () => {
+    const unit = buildOrderPayload(NETFLIX, "INR").purchase_units[0];
+    expect(unit?.amount.currency_code).toBe("INR");
+    expect(unit?.amount.breakdown.item_total.currency_code).toBe("INR");
+    expect(unit?.items[0]?.unit_amount.currency_code).toBe("INR");
+  });
+
+  it("should make a currency mismatch visible in the payload", () => {
+    expect(buildOrderPayload(NETFLIX, "INR").purchase_units[0]?.amount.currency_code).not.toBe(
+      buildOrderPayload(NETFLIX, "USD").purchase_units[0]?.amount.currency_code,
+    );
+  });
+});
+
 describe("orderPayload — shape", () => {
   it("should ask for a CAPTURE", () => {
     expect(buildOrderPayload(NETFLIX).intent).toBe("CAPTURE");

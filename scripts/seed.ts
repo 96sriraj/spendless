@@ -34,14 +34,42 @@ import { readOAuthToken, SANDBOX_BASE_URL } from "../src/adapters/token";
 import { readTransactions } from "../src/adapters/inspect";
 import { buildOrderPayload } from "../src/adapters/orderPayload";
 import { isPaymentEvent, exclusionReason } from "../src/core/eventCodes";
+import type { Currency } from "../src/core/validators";
 
 const SANDBOX = SANDBOX_BASE_URL;
 
-/** Identities the detectors will key on. These strings are the whole trick. */
+/**
+ * Currency the orders are charged in.
+ *
+ * It has to match what the PAYEE's account holds. On 2026-10-16 the hosted
+ * approval screen rejected a USD order with `UNSUPPORTED_PAYEE_CURRENCY`:
+ *
+ *   code=VU5TVVBQT1JURURfUEFZRUVfQ1VSUkVOQ1k=
+ *     = "UNSUPPORTED_PAYEE_CURRENCY"
+ *
+ * because the sandbox merchant account is India-based and settles in INR.
+ * That error surfaces on the web screen, not on any API response, so it reads
+ * like a broken page rather than a currency mismatch.
+ *
+ * Default INR to match the account. Override with SEED_CURRENCY=USD once the
+ * merchant account is USD-based — and note that in the script's output, since
+ * a default that is wrong in one direction is wrong silently.
+ */
+const SEED_CURRENCY = (process.env["SEED_CURRENCY"] ?? "INR") as Currency;
+
+/**
+ * Identities the detectors will key on. These strings are the whole trick.
+ *
+ * Amounts are in minor units and chosen to read as plausible INR prices
+ * (₹649, ₹1,299, ₹119) because the default currency is INR. Set
+ * SEED_CURRENCY=USD and they become $6.49 / $12.99 / $1.19 — cheap, but the
+ * detectors only care that the three charges for one merchant are equal, and
+ * a demo where "Netflix Premium" costs six rupees undermines itself.
+ */
 const SCENARIO = [
-  { key: "sub-netflix", label: "Netflix", amountCents: 1599 },
-  { key: "sub-adobe", label: "Adobe Creative Cloud", amountCents: 5999 },
-  { key: "sub-spotify", label: "Spotify", amountCents: 1199 },
+  { key: "sub-netflix", label: "Netflix", amountCents: 64_900 },
+  { key: "sub-adobe", label: "Adobe Creative Cloud", amountCents: 129_900 },
+  { key: "sub-spotify", label: "Spotify", amountCents: 11_900 },
 ] as const;
 
 type Created = { key: string; id: string; approveUrl: string };
@@ -113,7 +141,7 @@ function describeFailure(body: unknown): string {
 async function createOrder(entry: (typeof SCENARIO)[number]): Promise<Created | null> {
   const { status, body } = await call("/v2/checkout/orders", {
     method: "POST",
-    body: JSON.stringify(buildOrderPayload(entry)),
+    body: JSON.stringify(buildOrderPayload(entry, SEED_CURRENCY)),
   });
   if (status < 200 || status >= 300) {
     console.log(`  [order failed] ${entry.key}: HTTP ${status} — ${describeFailure(body)}`);
@@ -146,7 +174,13 @@ function transferLink(receiver: string, amountCents: number): string {
 // ---------------------------------------------------------------------------
 
 const created: Created[] = [];
-console.log(`spendless seed — method: ${method}\n`);
+console.log(`spendless seed — method: ${method}  currency: ${SEED_CURRENCY}\n`);
+if (SEED_CURRENCY === "USD") {
+  console.log(
+    "  USD orders need a USD-based merchant account. A mismatch fails on the\n" +
+      "  approval screen as UNSUPPORTED_PAYEE_CURRENCY, not on the API call.\n",
+  );
+}
 
 for (const entry of SCENARIO) {
   const order = await createOrder(entry);
