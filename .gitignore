@@ -13,6 +13,8 @@ coverage/
 .DS_Store
 Thumbs.db
 
-# Written by `bun run spike`. It quotes live API responses, so it is evidence
-# to review and commit deliberately — never a file that lands in git by accident.
+# Written by `bun run spike` and `bun run seed`. They quote live API responses
+# and hold order ids, so they are evidence to review and commit deliberately —
+# never a file that lands in git by accident.
 spike-result.md
+seed-state.json

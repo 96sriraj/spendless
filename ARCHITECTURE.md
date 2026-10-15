@@ -424,14 +424,19 @@ But the dispute tools are the reverse of what the plan assumed:
 - `accept_dispute_claim` posts to `/accept-claim`, whose own description reads: *"the dispute
   closes **in the customer's favor** and PayPal automatically refunds money to the customer."*
 
-That is the **buyer conceding** and paying themselves. It is useless to a merchant protecting
-revenue, and with merchant credentials it will most likely 401/403. The real merchant-side
-dispute surface is the Disputes API / Resolution Center, reached via a **Platform** account —
-different account type, different onboarding, and **not exposed by the MCP server at all**.
+That is the **buyer conceding** and paying themselves — not an action a merchant-protective agent
+would ever want to take. The real merchant-side dispute surface is the Disputes API / Resolution
+Center, reached via a **Platform** account — different account type, different onboarding, and **not
+exposed by the MCP server at all**.
 
-> **Risk to the build order.** Item 9 and P7-03 assume a working dispute lane. It may not exist.
-> Per `AGENTS.md` this is cut, not faked — so decide it at S-0-04 and do not design around it.
-> The refund and cancellation lanes are unaffected and carry the "it acts" claim on their own.
+> ⚠️ **Partly refuted by the live run (§11c): the endpoint returned HTTP 200 for merchant
+> credentials.** The prediction that it would 401/403 was wrong, and is struck. But *reachable* is
+> not *usable* — it is still the buyer's namespace, and nothing yet shows it lists disputes **raised
+> against** the merchant, which is the only kind worth acting on.
+
+> **Risk to the build order.** Item 9 and P7-03 assume a working dispute lane. Per `AGENTS.md` this
+> is cut, not faked — so S-0-04 still decides it, and a `HTTP 200` is not a green light. The refund
+> and cancellation lanes are unaffected and carry the "it acts" claim on their own.
 
 #### S-1 — still open, and it does not need to block
 
@@ -455,12 +460,67 @@ build depends on B being possible.
 longer "does the data support the detectors" — it is "does the field we are going to write come
 back". That is a five-minute test with a known answer either way.
 
-### Kill switch (from README)
+### 11c. Live result — 2026-10-15, first real sandbox call
 
-If by **Oct 20** the core PayPal integration is not demonstrably working end-to-end, drop it.
-Do not spend Nov 1–12 polishing something that cannot make a real PayPal call.
+`bun run spike`, first run. **This is the evidence, including where it refuted the desk research.**
 
----
+| Probe | Verdict | What it actually means |
+|---|---|---|
+| S-0-03 transactions readable | **OK** | Transaction Search works. The read path is real. |
+| S-0-05 token TTL | **OK** | `expires_in=32400` = **9 hours**, not the 3–8h in `AGENTS.md`. Refresh at 7h12m. |
+| S-0-02 business account | *probe bug* | `/v1/identity/v1/account/get` 404s on the sandbox host. Endpoint path was wrong, not the account. Re-probing via `/v1/catalogs/products`. |
+| **S-2-live identity** | **NOT ANSWERABLE YET** | See below. |
+| S-0-04 disputes reachable | **REACHABLE — I was wrong** | See below. |
+| S-0-04b subscriptions | OK | Listing responds. |
+
+#### The single transaction is not a payment
+
+```
+transaction 5210947356119124D   event_code=T1900   amount=500000   status=settled
+```
+
+**T1900 is "General account correction"** per PayPal's published T-code reference — an accounting
+adjustment, not a purchase. The sandbox shipped with a $5,000 balance correction and **zero payments**.
+
+So `S-2-live → NEGATIVE` is **not** evidence against the identity approach. It answered a question
+that had not been asked: *does an identity survive the round trip* cannot be tested on a transaction
+**we did not author**. Nothing was written into `invoice_id` or `custom_field`, because nothing was
+ever created.
+
+**The real state: the sandbox has no payments at all.** Until one exists there is nothing to classify,
+and the demo has no data. `bun run seed` (below) is now the critical path.
+
+#### I was wrong about the dispute tools
+
+`ARCHITECTURE.md §11a` predicted `/v1/customer/disputes` would most likely 401 or 403 for merchant
+credentials. **It returned HTTP 200.** The prediction was wrong and is struck.
+
+What that does *not* establish is that the dispute lane is usable. Reachable is not usable: the
+endpoint is still the buyer's namespace, and a merchant reaching it does not mean it lists disputes
+*raised against* the merchant — which is the only kind a merchant-protective agent would act on. The
+response body was not captured on this run, so the shape is still unknown. Re-probing with the body
+recorded. **Build-order item 9 stays contingent.** Do not treat `HTTP 200` as a green light.
+
+#### Response fields actually returned
+
+Thinner than the published schema. Present: `transaction_amount`, `invoice_id`, `custom_field`,
+`transaction_subject`, `transaction_event_code`, `transaction_status`, `instrument_type`,
+`protection_eligibility`, balances. **Absent: `payer_info` entirely** (confirming the MCP tool does not
+pass `fields=all`), plus `paypal_account_id`, `paypal_reference_id`, `fee_amount`, `transaction_note`.
+
+The three identity carriers *are* present as fields. They were simply empty. That is now a question
+with a test rather than an assumption.
+
+#### Next: `bun run seed`
+
+Creates real orders with `invoice_id`, `custom_id` and an item `name` all set on every purchase unit —
+all the merchant-authored carriers at once, so the round trip answers the question whichever one
+survives. One step is a browser flow by design: PayPal order approval. Then re-run `bun run spike` and
+read which field came back populated.
+
+**This is the kill-switch question.** If no merchant-authored identity survives, the detector graph has
+no merchant input from any PayPal API, and the demo must be reframed around recurrence and amounts
+alone — or the CSV-only path is taken.
 
 ## 12. Build order
 

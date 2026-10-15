@@ -150,23 +150,23 @@ async function main(): Promise<void> {
   console.log("\nspendless spike — sandbox");
   console.log(`token: ${token.slice(0, 6)}…${token.slice(-4)} (length ${token.length})`);
 
-  // ---- S-0-02 / S-0-03: is the account a business account with read access? --
+  // ---- S-0-02: is this a business account with read access? ----------------
+  // The identity endpoint 404s on the sandbox host, so the business-account
+  // signal comes from an endpoint that is unambiguously merchant-scoped.
+  // Either way the RAW BODY is recorded: a verdict of "OK" with no body tells
+  // nobody anything, which is exactly what the previous run produced.
   {
-    const { status, body } = await call("/v1/identity/v1/account/get", token);
-    if (status === 200) {
-      const acct = body as { legal_name?: string; country_code?: string; email?: string };
+    const probes = [
+      { path: "/v1/catalogs/products?page_size=1", label: "catalogs (merchant-only)" },
+      { path: "/v1/identity/v1/account/get", label: "identity" },
+    ];
+    for (const probe of probes) {
+      const { status, body } = await call(probe.path, token);
       record(
         "S-0-02",
-        "Is the connected account readable at all?",
-        "OK",
-        `legal_name="${acct.legal_name ?? "?"}" country=${acct.country_code ?? "?"}`,
-      );
-    } else {
-      record(
-        "S-0-02",
-        "Is the connected account readable at all?",
-        "FAIL",
-        `HTTP ${status}: ${describeError(body)}`,
+        `Is this a business account? (${probe.label})`,
+        status === 200 ? "OK" : status === 404 ? "N/A" : "FAIL",
+        `HTTP ${status}\n${JSON.stringify(body, null, 2).slice(0, 600)}`,
       );
     }
   }
@@ -252,26 +252,23 @@ async function main(): Promise<void> {
   }
 
   // ---- S-0-04: can MERCHANT credentials touch the buyer's dispute API? -----
+  // The previous run reported "OK" and nothing else, which is not a verdict -
+  // it is a shrug. Reachable-and-empty is a completely different answer from
+  // reachable-and-populated, so the body is recorded this time.
   {
     const { status, body } = await call("/v1/customer/disputes?page_size=5", token);
-    if (status === 200) {
-      record(
-        "S-0-04",
-        "Can merchant credentials reach /v1/customer/disputes?",
-        "OK",
-        "It answers. ARCHITECTURE.md §11a says it is the buyer's namespace — check\n" +
-          "what it actually returns before treating the dispute lane as buildable.",
-      );
-    } else {
-      record(
-        "S-0-04",
-        "Can merchant credentials reach /v1/customer/disputes?",
-        "NEGATIVE",
-        `HTTP ${status}: ${describeError(body)}\n` +
-          "This is the expected result. The dispute lane in build-order item 9 is\n" +
-          "not buildable on these credentials — cut it from the demo rather than faking it.",
-      );
-    }
+    const b = body as { total_items?: number; items?: unknown[] } | null;
+    const items = Array.isArray(b?.items) ? b.items.length : "n/a";
+    record(
+      "S-0-04",
+      "Can merchant credentials reach /v1/customer/disputes?",
+      status === 200 ? "REACHABLE" : "NEGATIVE",
+      `HTTP ${status}  total_items=${String(b?.total_items ?? "n/a")}  items=${String(items)}\n` +
+        `${JSON.stringify(body, null, 2).slice(0, 600)}\n\n` +
+        "REACHABLE IS NOT THE SAME AS USABLE. This is the buyer's namespace: a\n" +
+        "merchant reaching it does not mean it lists disputes *against* the\n" +
+        "merchant. Confirm the shape before treating the dispute lane as buildable.",
+    );
   }
 
   // ---- S-0-04b: can we read subscriptions? --------------------------------
@@ -282,7 +279,8 @@ async function main(): Promise<void> {
       "Can the sandbox list subscriptions?",
       status === 200 ? "OK" : "FAIL",
       status === 200
-        ? `total_items=${(body as { total_items?: number }).total_items ?? "?"}`
+        ? `HTTP 200  total_items=${String((body as { total_items?: number }).total_items ?? "n/a")}\n` +
+          `${JSON.stringify(body, null, 2).slice(0, 600)}`
         : `HTTP ${status}: ${describeError(body)}`,
     );
   }
