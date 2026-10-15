@@ -92,7 +92,7 @@ describe("mergeTransactions — boundary dedup", () => {
     merchantKey: "sub-netflix",
     identitySource: "seed_invoice_id",
     amountCents: 1_599,
-    currency: "USD",
+    currencyCode: "USD",
     capturedAt,
     eventCode: "T0001",
     status: "settled",

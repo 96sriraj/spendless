@@ -229,11 +229,27 @@ async function main(): Promise<void> {
         record(
           "S-2-live",
           "Does a merchant-authored identity survive the round trip?",
-          verdict.identitySource === "unknown" ? "NEGATIVE" : "POSITIVE",
+          verdict.identitySource === "unknown" ? "NOT YET SEEDED" : "POSITIVE",
           `first transaction ${identity.id} resolved to "${identity.merchantKey}" ` +
             `via ${verdict.foundIn ?? "nothing"} (${verdict.identitySource})\n` +
             `event_code=${identity.eventCode} amount=${identity.amountCents} ` +
             `status=${identity.status}`,
+        );
+        // The raw ISO code, read from the response rather than inferred. This is
+        // the account's actual settlement currency, and it is the missing piece
+        // behind UNSUPPORTED_PAYEE_CURRENCY: order creation accepted 17
+        // currencies, but the payee can only receive one of them.
+        const amountOf = identity.raw as {
+          transaction_info?: { transaction_amount?: { currency_code?: unknown } };
+        };
+        const rawCode = amountOf.transaction_info?.transaction_amount?.currency_code;
+        record(
+          "CURRENCY",
+          "What currency does this account actually transact in?",
+          typeof rawCode === "string" ? "FOUND" : "ABSENT",
+          `transaction_amount.currency_code = ${JSON.stringify(rawCode)}\n` +
+            "Read from the response, not assumed. This is the currency the account\n" +
+            "settles in, which is what UNSUPPORTED_PAYEE_CURRENCY is about.",
         );
         record(
           "S-2-live",

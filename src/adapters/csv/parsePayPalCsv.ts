@@ -23,7 +23,6 @@ import {
   type RawTransaction,
   type TransactionStatus,
 } from "../AccountSource";
-import { DEFAULT_CURRENCY, type Currency } from "@/core/validators";
 
 // ---------------------------------------------------------------------------
 // CSV
@@ -201,9 +200,11 @@ function parseCapturedAt(
   return Number.isNaN(Date.parse(iso)) ? null : iso;
 }
 
-function mapCurrency(raw: string): Currency {
+function normaliseCurrencyCode(raw: string): string {
   const code = raw.trim().toUpperCase();
-  return code === "INR" ? "INR" : DEFAULT_CURRENCY;
+  // Kept verbatim. A consumer export can name any currency the account has ever
+  // held, and narrowing it here would quietly relabel a EUR row as dollars.
+  return /^[A-Z]{3}$/.test(code) ? code : "UNKNOWN";
 }
 
 // ---------------------------------------------------------------------------
@@ -260,7 +261,7 @@ export function createCsvAccountSource(text: string): AccountSource {
       merchantKey: cell(cols.Name) || "unknown",
       identitySource: cell(cols.Name).length > 0 ? "csv_payee" : "unknown",
       amountCents,
-      currency: mapCurrency(cell(cols.Currency)),
+      currencyCode: normaliseCurrencyCode(cell(cols.Currency)),
       capturedAt,
       eventCode: "",
       status,

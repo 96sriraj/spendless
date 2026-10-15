@@ -15,7 +15,6 @@
  * transaction series itself, which is checkable without a sandbox.
  */
 
-import type { Currency } from "./validators";
 
 export const CADENCES = ["weekly", "monthly", "yearly", "irregular"] as const;
 export type Cadence = (typeof CADENCES)[number];
@@ -27,7 +26,7 @@ const DAY_MS = 86_400_000;
 
 export type Series = {
   readonly merchantKey: string;
-  readonly currency: Currency;
+  readonly currencyCode: string;
   /** Ascending by capturedAt. */
   readonly amounts: readonly number[];
   /** Ascending by capturedAt, ISO 8601. */
@@ -36,7 +35,7 @@ export type Series = {
 
 export type Recurrence = {
   readonly merchantKey: string;
-  readonly currency: Currency;
+  readonly currencyCode: string;
   readonly cadence: Cadence;
   /** Median gap between charges, in days. Null for fewer than two charges. */
   readonly medianGapDays: number | null;
@@ -117,7 +116,7 @@ export function analyse(series: Series): Recurrence {
 
   return {
     merchantKey: series.merchantKey,
-    currency: series.currency,
+    currencyCode: series.currencyCode,
     cadence,
     medianGapDays,
     medianAmountCents,
@@ -140,7 +139,7 @@ export function inferRecurrence(
     readonly merchantKey: string;
     readonly identitySource: string;
     readonly amountCents: number;
-    readonly currency: Currency;
+    readonly currencyCode: string;
     readonly capturedAt: string;
   }[],
 ): Recurrence[] {
@@ -152,13 +151,13 @@ export function inferRecurrence(
     if (existing === undefined) {
       groups.set(t.merchantKey, {
         merchantKey: t.merchantKey,
-        currency: t.currency,
+        currencyCode: t.currencyCode,
         amounts: [t.amountCents],
         dates: [t.capturedAt],
       });
       continue;
     }
-    if (existing.currency !== t.currency) continue;
+    if (existing.currencyCode !== t.currencyCode) continue;
     groups.set(t.merchantKey, {
       ...existing,
       amounts: [...existing.amounts, t.amountCents],

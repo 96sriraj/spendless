@@ -204,7 +204,28 @@ describe("inspect — readTransactions", () => {
     expect(readTransactions(broken)).toEqual([]);
   });
 
-  it("should default to USD for a missing currency rather than guess INR", () => {
+  // RED on a bug this account surfaced. Order creation accepts 17 currency
+  // codes here, so a response can legitimately carry EUR or GBP. The old code
+  // defaulted anything unrecognised to USD - which would have relabelled a euro
+  // transaction as dollars, and that shows up as plausible numbers on screen
+  // rather than as a crash.
+  it("should carry the provider's currency code through verbatim", () => {
+    const euros = {
+      ...RESPONSE,
+      transaction_details: [
+        {
+          ...RESPONSE.transaction_details[0]!,
+          transaction_info: {
+            ...RESPONSE.transaction_details[0]!.transaction_info,
+            transaction_amount: { currency_code: "EUR", value: "15.99" },
+          },
+        },
+      ],
+    };
+    expect(readTransactions(euros)[0]?.currencyCode).toBe("EUR");
+  });
+
+  it("should drop a transaction with no currency rather than invent one", () => {
     const noCurrency = {
       ...RESPONSE,
       transaction_details: [
@@ -217,7 +238,7 @@ describe("inspect — readTransactions", () => {
         },
       ],
     };
-    expect(readTransactions(noCurrency)[0]?.currency).toBe("USD");
+    expect(readTransactions(noCurrency)).toEqual([]);
   });
 });
 

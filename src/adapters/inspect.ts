@@ -15,7 +15,6 @@
  */
 
 import {
-  DEFAULT_CURRENCY,
   type Currency,
 } from "@/core/validators";
 import type { IdentitySource, RawTransaction, TransactionStatus } from "./AccountSource";
@@ -140,10 +139,33 @@ export function readAmountCents(money: unknown): number | null {
   return Number.isFinite(cents) ? Math.abs(cents) : null;
 }
 
-function readCurrency(money: unknown): Currency {
+/**
+ * The ISO code as the provider sent it, or null when absent.
+ *
+ * Kept separate from the domain mapping below because the two must not be
+ * confused. Order creation accepts 17 currencies on this account, so a
+ * response can legitimately carry EUR or GBP - and silently reporting those as
+ * USD would corrupt every money figure in the demo while looking perfectly
+ * healthy. Read the raw code; map it deliberately.
+ */
+export function readCurrencyCode(money: unknown): string | null {
   const record = asRecord(money);
   const code = record?.["currency_code"];
-  return typeof code === "string" && code.toUpperCase() === "INR" ? "INR" : DEFAULT_CURRENCY;
+  return typeof code === "string" && code.length > 0 ? code.toUpperCase() : null;
+}
+
+/**
+ * Map a provider ISO code onto a currency the product can render.
+ *
+ * Returns null for anything outside the supported set rather than defaulting.
+ * The first version defaulted to USD, which meant a EUR transaction would be
+ * labelled dollars - a bug that shows up as plausible numbers rather than as a
+ * crash, and would have reached the video.
+ */
+export function readCurrency(money: unknown): Currency | null {
+  const code = readCurrencyCode(money);
+  if (code === "USD" || code === "INR") return code;
+  return null;
 }
 
 /** PayPal's single-letter status codes -> the port's enum. */
@@ -183,12 +205,18 @@ export function readTransactions(body: unknown): RawTransaction[] {
     }
 
     const identity = findMerchantIdentity(record);
+    const currencyCode = readCurrencyCode(info["transaction_amount"]);
+    // A transaction with no currency cannot be given a value honestly, and a
+    // wrong currency is worse than a missing one: it corrupts every figure
+    // downstream while still looking plausible on screen.
+    if (currencyCode === null) continue;
+
     out.push({
       id,
       merchantKey: identity.merchantKey,
       identitySource: identity.identitySource,
       amountCents,
-      currency: readCurrency(info["transaction_amount"]),
+      currencyCode,
       capturedAt: new Date(date).toISOString(),
       eventCode: typeof info["transaction_event_code"] === "string" ? info["transaction_event_code"] : "",
       status: STATUS[String(info["transaction_status"])] ?? "settled",

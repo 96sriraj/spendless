@@ -6,7 +6,7 @@ import {
   MIN_CHARGES_FOR_RECURRENCE,
   type Series,
 } from "./recurrence";
-import type { Currency } from "./validators";
+
 
 const DAY = 86_400_000;
 const BASE = Date.parse("2026-01-15T00:00:00.000Z");
@@ -18,7 +18,7 @@ function monthlySeries(
   const amounts = overrides.amounts ?? [1_599, 1_599, 1_599, 1_599];
   return {
     merchantKey: "sub-netflix",
-    currency: "USD",
+    currencyCode: "USD",
     amounts,
     dates: amounts.map((_, i) => new Date(BASE + i * gap * DAY).toISOString()),
   };
@@ -116,7 +116,7 @@ describe("recurrence — analyse", () => {
   it("should ignore unparseable dates when measuring gaps", () => {
     const r = analyse({
       merchantKey: "m",
-      currency: "USD",
+      currencyCode: "USD",
       amounts: [1_599, 1_599, 1_599],
       dates: ["not-a-date", "also-bad", "still-bad"],
     });
@@ -141,8 +141,8 @@ describe("recurrence — inferRecurrence", () => {
     capturedAt: string,
     amountCents: number,
     identitySource = "seed_invoice_id",
-    currency: Currency = "USD",
-  ) => ({ merchantKey, identitySource, amountCents, currency, capturedAt });
+    currencyCode: string = "USD",
+  ) => ({ merchantKey, identitySource, amountCents, currencyCode, capturedAt });
 
   it("should group by merchant and find the subscription", () => {
     const result = inferRecurrence([

@@ -83,7 +83,16 @@ export type RawTransaction = {
   readonly merchantKey: string;
   readonly identitySource: IdentitySource;
   readonly amountCents: number;
-  readonly currency: Currency;
+  /**
+   * The ISO code exactly as the provider sent it.
+   *
+   * Deliberately a plain string, not our `Currency` enum. This account accepts
+   * 17 currency codes at order creation, so a response can legitimately carry
+   * EUR or GBP — narrowing that here to USD|INR would either relabel a euro
+   * transaction as dollars or silently drop it. Both are worse than carrying
+   * the truth and deciding at the edge where we can say so.
+   */
+  readonly currencyCode: string;
   /** ISO 8601. */
   readonly capturedAt: string;
   /** PayPal's five-digit T-code, e.g. "T0001". Empty for CSV rows. */

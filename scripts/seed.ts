@@ -339,7 +339,7 @@ if (status !== 200) {
       ? "payment"
       : (exclusionReason(tx.eventCode) ?? "?");
     console.log(
-      `  ${tx.id}  ${tx.eventCode}  ${String(tx.amountCents).padStart(7)}c ${tx.currency}  key="${tx.merchantKey}"  [${event}]`,
+      `  ${tx.id}  ${tx.eventCode}  ${String(tx.amountCents).padStart(7)}c ${tx.currencyCode}  key="${tx.merchantKey}"  [${event}]`,
     );
   }
   const payments = rows.filter((r) => isPaymentEvent(r.eventCode));
