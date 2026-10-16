@@ -544,7 +544,7 @@ The compliant route is a `single_use_token`, produced by **hosted fields** — a
 > depends on (rehearse cold, twice, once with the network dropped). Budget a human into the seed
 > loop, and keep a pre-recorded capture for the video.
 
-#### The hosted screen failure was a CURRENCY mismatch, not the account country
+#### The hosted screen failure was the PAYEE's settlement currency — resolved
 
 The generic "Things don't appear to be working at the moment" page carries a base64 `code`. Decoded:
 
@@ -553,18 +553,49 @@ code=VU5TVVBQT1JURURfUEFZRUVfQ1VSUkVOQ1k=
     = "UNSUPPORTED_PAYEE_CURRENCY"
 ```
 
-The sandbox merchant account is **India-based and settles in INR**, and the orders were created in
-**USD**. PayPal accepted the orders without complaint and only refused at the payer's screen — the
-mismatch surfaces on the web page and never on an API response, which is why it read as a broken
-checkout rather than a bad currency.
+**Resolved 2026-10-17.** The cause was the **payee** side, not the buyer and not the payload. The
+sandbox pair was India-based; a fresh **US** business account with a new app attached accepts a USD
+order and the approval screen **renders correctly** — Pay Now, the card list, no error page. Charging
+in INR instead was a workaround for a symptom; it was never the fix.
 
-The earlier hypothesis — that the buyer account's country had to be US — was **wrong**. Country is
-fixed at sandbox-account creation and cannot be edited, but it is not the cause. The orders now charge
-in INR to match the payee, and the amounts read as plausible Indian prices rather than $6.49 Netflix.
+Three diagnoses were wrong before this one, and they are worth recording because each looked
+plausible:
 
-> Worth keeping: the currency in the product core is already threaded per row (`ARCHITECTURE.md` §5,
-> the `["USD","INR"]` pass). That decision, made for a different reason in a different week, is why
-> this was a one-line seed change rather than a refactor.
+| Attempted fix | Read | Why it was wrong |
+|---|---|---|
+| Buyer country must be US | `UNSUPPORTED_PAYEE_CURRENCY` | Country is **unfixable after creation** and was never the cause. |
+| Charge in INR | `INVALID_CURRENCY_CODE` | Order creation rejected INR outright — PayPal India does not accept it. |
+| `application_context` fixes the screen | same error | Every field in it is deprecated in Orders v2.9. |
+
+The method that actually worked each time was **decoding the base64 `code=` and reading the raw API
+response**, never reasoning from documentation. §11a exists because the docs were actively
+misleading here.
+
+#### The remaining blocker is the BUYER's funding source, not ours
+
+With the screen rendering, the flow hangs at "Pay Now" forever. Two buyer-side causes, both
+environmental:
+
+- **"Pay with PayPal balance" is greyed out — "Unavailable to use this."** The personal sandbox
+  account has a **$0 balance**. Expected: the dashboard's default **Create Account** button gives
+  zero balances. PayPal's docs are explicit that a custom balance requires **Create Custom Account**
+  in the same dialog.
+- **Cards spin indefinitely.** Sandbox card funding routes through a 3-D Secure challenge, which is
+  routinely blocked by ad blockers, antivirus web shields, and country-level DNS filters. The fix is
+  environmental, not a payload change.
+
+Per PayPal's own sandbox guidance, a buyer that can actually pay needs **all three** of: a
+**verified** status, a **PayPal balance**, and a **test card on file**. The card alone is not enough
+— PayPal requires a backup funding source before it will draw on a balance.
+
+> **Why this belongs here and not just the run log:** the demo depends on a human clicking in a
+> browser with a specific browser/network profile. Whatever combination works is what `H5-01`
+> rehearsal and the video capture must be done under. Budget for it explicitly rather than
+> discovering it on demo day.
+
+> Worth keeping: the currency in the product core is already threaded per row (§5, the
+> `["USD","INR"]` pass). That decision, made for a different reason in a different week, is why
+> switching the seed's currency was a one-line change rather than a refactor.
 
 #### Browser fallback for the read path
 

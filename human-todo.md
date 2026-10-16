@@ -119,27 +119,32 @@
   - One click, no checkout flow, no cookies, no country problem. **It carries no `invoice_id`**, so it
     proves the read path sees real payments but proves nothing about identity — do not mistake it for
     the S-2-live answer.
-- [ ] **H1-05e** `[dashboard, ~10 min]` **RESET the sandbox account pair.** The current pair cannot
-  move money in either direction.
-  - Three independent symptoms, one cause:
-    1. Hosted approval fails with `UNSUPPORTED_PAYEE_CURRENCY` (decoded from the page URL).
-    2. Sending money personal -> business fails with *"Your account is not supported for this action."*
-    3. Order creation works fine, so the API and the app are healthy.
-  - (2) is the tell: a **buyer** account that cannot send money is not a fully
-    initialised sandbox account. Combined with (1), the app is most likely attached
-    to the **personal** account, which cannot receive payments at all — which is
-    exactly what `UNSUPPORTED_PAYEE_CURRENCY` means.
-  - **The reset, in order:**
-    1. Testing Tools → Sandbox Accounts → **Create Account → Business, country United States.**
-    2. Create Account → **Personal, country United States.**
-    3. Apps & Credentials → Sandbox → **Create a NEW app** and attach it to the new
-       **Business** account.
-    4. Enable **Transaction Search** on that new app (H1-03).
-    5. Use the new client ID + secret for `bun run seed`.
-  - This is a fresh, coherent US/USD pair. Everything we tried assumed the existing
-    India-based pair could take USD, and three separate signals say it cannot.
-  - **Do not spend more than ~10 minutes on this.** If it does not work, take the
-    CSV-only decision instead — see the decision block below.
+- [x] **H1-05e** `[DONE 2026-10-17]` **RESET the sandbox account pair.** → **WORKED.**
+  - Fresh US **business** account + new app attached to it + fresh US **personal** account.
+  - **Result: the approval screen now renders correctly.** Pay Now button, the card list, no error
+    page. `UNSUPPORTED_PAYEE_CURRENCY` is **gone**. The cause was the payee's settlement currency,
+    exactly as the decoded code said — the old pair was India-based.
+  - This also retires the transfer fallback (H1-05d): it existed to route around a dead approval
+    screen, and the screen is no longer dead.
+- [ ] **H1-05f** `[dashboard, ~5 min]` **Give the buyer account a PayPal balance.** This is the last
+  thing between us and a real payment.
+  - The screen says **"Pay with PayPal balance — Unavailable to use this."** The personal sandbox
+    account has a **$0 balance**.
+  - **This is expected and not a bug.** The dashboard's default **Create Account** button creates
+    accounts with *zero* balances. PayPal's docs: to customise test values you must use **Create
+    Custom Account** in that same dialog.
+  - **Either route works:**
+    1. Dashboard → Sandbox → Accounts → click the personal account → **Profile → Funding → Edit
+       PayPal balance** → save. Set it to anything above the order total (`50000` is conventional).
+    2. Or create a fresh one: **Create Account → Create Custom Account → Personal, US**, with
+       **status Bank Verified**, a **test card on file**, and a **PayPal balance** of `50000`.
+  - ⚠️ **All three are required, not just the balance.** PayPal will not draw on a balance without a
+    verified status *and* a backup funding source. The card alone is not enough either — which is
+    why the card path is also failing.
+  - **If the balance route also hangs**, the card path is a browser/network problem, not a PayPal
+    one: disable ad blockers + antivirus web shield, try a second browser, and try mobile data.
+    Sandbox card funding goes through a 3-D Secure redirect that gets filtered in some regions.
+  - **Then:** `bun run seed` (fresh links — they are single-use), approve, `bun run spike`.
 
 - [ ] **H1-06** `[sandbox]` Force a dispute on a real sandbox payment → expect a dispute visible via the API
   - ⚠️ **Deprioritised, and partly refuted.** All three MCP dispute tools call `/v1/customer/disputes`
@@ -223,24 +228,25 @@
 
 ---
 
-## 🔴 Decision needed — 3.8 days to the kill switch
+## 🟡 Decision deferred — option A is winning
 
-> The PayPal sandbox account pair cannot move money in either direction. Every remaining
-> unblocked build item depends on either that working, or on an explicit decision not to.
-> **This needs the founder, not the agent.**
-
-| Option | What you get | What you lose |
->|---|---|---|
->| **A. Reset the sandbox accounts** (H1-05e, ~10 min) | Everything as planned: merchant-side demo, real refunds, real cancellations, run log against live PayPal data. | Nothing, if it works. Three symptoms say the current pair is not fit for purpose. |
->| **B. CSV-only pivot** | The full product, already built and tested: real AI reasoning over real PayPal export data, run log, e2e demo. No credential needed. | The merchant-side PayPal execution story. A judge checking "did they integrate PayPal?" sees a CSV parser. |
-
-> **Recommendation: give A one focused attempt (~10 min), then take B without guilt.** The
-> detector graph, the run log, the agent loop and the whole test suite are binding-C agnostic —
-> only the adapter binding changes. B is a smaller demo, not a broken one.
+> **Update 2026-10-17: the account reset WORKED.** The approval screen renders. `A` is no longer a
+> gamble, it is a partially-completed job with one small task left: give the buyer account a PayPal
+> balance (**H1-05f**, ~5 min). I am no longer recommending the CSV pivot.
 >
-> `AGENTS.md` is explicit that the dispute lane is to be *cut, never faked*. The same applies
-> here: better a smaller honest demo than a large one resting on a sandbox that will not move
-> money.
+> The original framing was that a sandbox which cannot move money in either direction would force
+> the choice. That reading was wrong — it was one misconfigured payee account. Keep **B** as the
+> fallback if H1-05f plus the browser/network checks do not produce a payment by **Oct 19**, but do
+> not treat it as the expected outcome any more.
+
+| Option | Status | What you get | What you lose |
+|---|---|---|---|
+| **A. Reset the sandbox accounts** (H1-05e) | ✅ **done — it worked** | Merchant-side demo: real refunds, real cancellations, run log against live PayPal data. | Nothing. |
+| **A′. Fund the buyer** (H1-05f) | ☐ **the one task left** | Unblocks the payment. The balance is the whole of it. | Nothing. |
+| **B. CSV-only pivot** | fallback, deferred to Oct 19 | Full product, already built and tested: real AI reasoning over real PayPal export data. No credential needed. | The merchant-side PayPal execution story. A judge checking "did they integrate PayPal?" sees a CSV parser. |
+
+> The detector graph, the run log, the agent loop and the whole test suite are binding-agnostic —
+> only the adapter binding changes between A and B. B is a smaller demo, not a broken one.
 
 ## Decisions needed from the founder
 
