@@ -17,7 +17,8 @@
     "verify": "bun run typecheck && vitest run",
     "db:migrate": "wrangler d1 migrations apply spendless --local",
     "spike": "bun run scripts/spike.ts",
-    "seed": "bun run scripts/seed.ts"
+    "seed": "bun run scripts/seed.ts",
+    "capture": "bun run scripts/capture.ts"
   },
   "dependencies": {
     "zod": "^3.25.0"

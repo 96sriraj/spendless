@@ -30,13 +30,11 @@
  */
 
 import { writeFile } from "node:fs/promises";
-import { readOAuthToken, SANDBOX_BASE_URL } from "../src/adapters/token";
 import { readTransactions } from "../src/adapters/inspect";
 import { buildOrderPayload } from "../src/adapters/orderPayload";
 import { isPaymentEvent, exclusionReason } from "../src/core/eventCodes";
 import type { Currency } from "../src/core/validators";
-
-const SANDBOX = SANDBOX_BASE_URL;
+import { call, describeFailure, mintToken, statePath, type Created } from "./helpers";
 
 /**
  * Currency the orders are charged in.
@@ -74,74 +72,22 @@ const SCENARIO = [
   { key: "sub-spotify", label: "Spotify", amountCents: 1_199 },
 ] as const;
 
-type Created = { key: string; id: string; approveUrl: string };
-
-const token = await mintToken();
-if (token === null) {
+// Narrowed once, explicitly. The helpers are hoisted function declarations, and
+// relying on control-flow narrowing surviving into them is the kind of thing
+// that breaks on an unrelated edit three weeks from now.
+const minted = await mintToken();
+if (minted === null) {
   console.log("No credentials. Set PAYPAL_CLIENT_ID and PAYPAL_CLIENT_SECRET.");
   process.exit(1);
 }
+const token: string = minted;
 
-const statePath = "seed-state.json";
 const method = process.argv.includes("--method")
   ? (process.argv[process.argv.indexOf("--method") + 1] ?? "approve")
   : "approve";
 
-async function mintToken(): Promise<string | null> {
-  const explicit = process.env["PAYPAL_ACCESS_TOKEN"];
-  if (explicit !== undefined && explicit.trim().length > 0) return explicit;
-  const id = process.env["PAYPAL_CLIENT_ID"];
-  const secret = process.env["PAYPAL_CLIENT_SECRET"];
-  if (id === undefined || secret === undefined) return null;
-
-  const basic = Buffer.from(`${id}:${secret}`, "utf8").toString("base64");
-  const response = await fetch(`${SANDBOX}/v1/oauth2/token`, {
-    method: "POST",
-    headers: {
-      Authorization: `Basic ${basic}`,
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
-    body: "grant_type=client_credentials",
-  });
-  return readOAuthToken(await response.json())?.accessToken ?? null;
-}
-
-async function call(
-  path: string,
-  init: RequestInit = {},
-): Promise<{ status: number; body: unknown }> {
-  const response = await fetch(`${SANDBOX}${path}`, {
-    ...init,
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-      "PayPal-Request-Id": `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
-      ...(init.headers ?? {}),
-    },
-  });
-  let body: unknown;
-  try {
-    body = await response.json();
-  } catch {
-    body = null;
-  }
-  return { status: response.status, body };
-}
-
-function describeFailure(body: unknown): string {
-  const b = body as { message?: string; details?: unknown[] } | null;
-  const message = b?.message ?? "unknown error";
-  const details = Array.isArray(b?.details)
-    ? b.details
-        .map((d) => (d as { description?: string })?.description ?? "")
-        .filter(Boolean)
-        .join("; ")
-    : "";
-  return details.length > 0 ? `${message} — ${details}` : message;
-}
-
 async function createOrder(entry: (typeof SCENARIO)[number]): Promise<Created | null> {
-  const { status, body } = await call("/v2/checkout/orders", {
+  const { status, body } = await call("/v2/checkout/orders", token, {
     method: "POST",
     body: JSON.stringify(buildOrderPayload(entry, SEED_CURRENCY, { modern: true })),
   });
@@ -162,7 +108,7 @@ async function createOrder(entry: (typeof SCENARIO)[number]): Promise<Created | 
   }
 
   // Re-read it, so the state shown is PayPal's rather than our assumption.
-  const reread = await call(`/v2/checkout/orders/${order.id}`);
+  const reread = await call(`/v2/checkout/orders/${order.id}`, token);
   const r = reread.body as {
     status?: string;
     purchase_units?: { amount?: { currency_code?: string; value?: string } }[];
@@ -238,7 +184,7 @@ async function probeCurrencies(): Promise<void> {
   console.log("(Each attempt creates a CREATED order that will simply expire.)\n");
 
   for (const currency of candidates) {
-    const { status, body } = await call("/v2/checkout/orders", {
+    const { status, body } = await call("/v2/checkout/orders", token, {
       method: "POST",
       body: JSON.stringify(
         buildOrderPayload(
@@ -355,7 +301,7 @@ const params = new URLSearchParams({
   end_date: end.toISOString(),
   page_size: "100",
 });
-const { status, body } = await call(`/v1/reporting/transactions?${params}`);
+const { status, body } = await call(`/v1/reporting/transactions?${params}`, token);
 
 if (status !== 200) {
   console.log(`  could not read transactions: HTTP ${status} — ${describeFailure(body)}`);
