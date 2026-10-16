@@ -15,6 +15,7 @@ import { writeFileSync } from "node:fs";
 import { fieldInventory, findMerchantIdentity, IDENTITY_FIELDS, readTransactions } from "../src/adapters/inspect";
 import { chunkRange, mergeTransactions, PAYPAL_MAX_WINDOW_DAYS } from "../src/adapters/chunkRange";
 import { describeFreshness, readReportingFreshness, type ReportingFreshness } from "../src/adapters/freshness";
+import { pickIdentitySubjects } from "../src/adapters/identityScan";
 import { readOAuthToken, refreshAfterSeconds, SANDBOX_BASE_URL } from "../src/adapters/token";
 
 const SANDBOX = SANDBOX_BASE_URL;
@@ -239,12 +240,31 @@ async function main(): Promise<void> {
       }
 
       if (identity !== null) {
-        const verdict = findMerchantIdentity({ transaction_details: [{ transaction_info: identity.raw }] });
+        // Every row is scanned, not just the first. This account holds a T1900
+        // adjustment carrying no identity at all, and row order is PayPal's to
+        // choose — so reading `transactions[0]` would report `unknown` from the
+        // adjustment while a seeded payment sat unexamined in the same response.
+        const scan = pickIdentitySubjects(merged);
+        const verdict = findMerchantIdentity({
+          transaction_details: [{ transaction_info: identity.raw }],
+        });
+
         record(
           "S-2-live",
           "Does a merchant-authored identity survive the round trip?",
-          verdict.identitySource === "unknown" ? "NOT YET SEEDED" : "POSITIVE",
-          `first transaction ${identity.id} resolved to "${identity.merchantKey}" ` +
+          scan.identified.length > 0 ? "POSITIVE" : "NOT YET SEEDED",
+          `${scan.identified.length} of ${merged.length} rows carry a merchant-authored identity` +
+            (scan.identified.length > 0
+              ? `\n\n${scan.identified
+                  .map(
+                    (row) =>
+                      `  ${row.id}  ${row.eventCode}  ${row.amountCents}  "${row.merchantKey}"` +
+                      ` via ${row.identitySource}` +
+                      (row.subject === null ? "" : `  subject="${row.subject}"`),
+                  )
+                  .join("\n")}`
+              : "\n\nnone — either too fresh for the cache, or not seeded") +
+            `\n\nreported on ${identity.id}: "${identity.merchantKey}" ` +
             `via ${verdict.foundIn ?? "nothing"} (${verdict.identitySource})\n` +
             `event_code=${identity.eventCode} amount=${identity.amountCents} ` +
             `status=${identity.status}`,
