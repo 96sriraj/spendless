@@ -253,7 +253,37 @@ page to redirect back. The second is the durable one — it does not depend on t
 | D1 | Demo persona framing — merchant-side vs consumer narrative with merchant-side execution | ☐ open | **Oct 12** (H1-07) — changes the README |
 | D2 | Which OpenRouter model for the agent | ☐ open | Oct 18 (H2-02) |
 | D3 | Hold the `*.workers.dev` subdomain or buy a domain | ☐ open | Nov 2 — **default: hold, do not buy** |
-| D4 | Pull the trigger if the Oct 20 kill switch fires | ☐ open | **Oct 20** |
+| D4 | Pull the trigger if the Oct 20 kill switch fires | ✅ **closed — kill switch did not fire** | — |
+| **D5** | **How to demo recurrence, given live sandbox cannot produce it** | ✅ **CLOSED — founder chose BOTH (Oct 17)** | — |
+
+### D5 — recurrence demo: both lanes, clearly labelled
+
+**The constraint, stated as evidence rather than assumption.** `recurrence.ts` needs a *date gap*:
+
+```ts
+if (!Number.isFinite(days) || days <= 0) return "irregular";
+```
+
+Every PayPal sandbox transaction is stamped at the moment of capture, and PayPal offers no way to
+backdate one. So three Netflix charges in one minute produce gaps of `[0, 0]` → `irregular` →
+`isRecurring: false`. **No amount of seeding makes recurrence fire on live merchant data.** Only a
+stream with months in it can produce a cadence.
+
+**Decision: do both, and never let the UI blur which is which.**
+
+| Lane | Carries | Why it exists |
+|---|---|---|
+| **Live sandbox** | identity round-trip, real reads, real refunds, real cancellations, run log | Proves **it acts on real PayPal**. Cannot prove it is *smart*. |
+| **Seeded history** | a realistic multi-month series in our own D1, under the same merchant keys | Gives the detectors the date spread only history can provide. This is what a merchant's account genuinely looks like after months of running. |
+| **CSV** | a consumer-narrative export | The only source carrying a real merchant name. Keeps the consumer story honest. |
+
+**The rule that makes this acceptable:** seeded history is ours, and it is *history* — it is never
+presented as a live payment. The live capture is the newest row on top of it. The UI must label which is
+which, because the one thing this project will not do is present invented data as observed data.
+
+> Note this is a deliberate departure from `P4-01`'s "real API calls, not hand-inserted rows". That
+> instruction was written before anyone knew PayPal cannot backdate. The departure is recorded here
+> rather than absorbed quietly.
 
 ## Escalate immediately if
 
