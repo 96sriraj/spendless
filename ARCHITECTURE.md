@@ -571,27 +571,59 @@ The method that actually worked each time was **decoding the base64 `code=` and 
 response**, never reasoning from documentation. §11a exists because the docs were actively
 misleading here.
 
-#### The remaining blocker is the BUYER's funding source, not ours
+#### S-2-live: the identity carriers are CONFIRMED readable. The round trip is pending only on cache lag
 
-With the screen rendering, the flow hangs at "Pay Now" forever. Two buyer-side causes, both
-environmental:
+**Payments captured 2026-10-17.** `31F89528X81443109` and `6YN00176GH7185627`, via
+`bun run capture --capture`. This is the `AGENTS.md` kill-switch criterion met three days early: the core
+PayPal integration works end to end — create order, buyer approves, we capture, money moves.
 
-- **"Pay with PayPal balance" is greyed out — "Unavailable to use this."** The personal sandbox
-  account has a **$0 balance**. Expected: the dashboard's default **Create Account** button gives
-  zero balances. PayPal's docs are explicit that a custom balance requires **Create Custom Account**
-  in the same dialog.
-- **Cards spin indefinitely.** Sandbox card funding routes through a 3-D Secure challenge, which is
-  routinely blocked by ad blockers, antivirus web shields, and country-level DNS filters. The fix is
-  environmental, not a payload change.
+**The identity question is settled, and not by the spike's read yet.** Transaction Search returned these
+field names in the live response:
 
-Per PayPal's own sandbox guidance, a buyer that can actually pay needs **all three** of: a
-**verified** status, a **PayPal balance**, and a **test card on file**. The card alone is not enough
-— PayPal requires a backup funding source before it will draw on a balance.
+```
+transaction_info.invoice_id
+transaction_info.custom_field
+transaction_info.transaction_subject
+cart_info.item_detail
+```
 
-> **Why this belongs here and not just the run log:** the demo depends on a human clicking in a
-> browser with a specific browser/network profile. Whatever combination works is what `H5-01`
-> rehearsal and the video capture must be done under. Budget for it explicitly rather than
-> discovering it on demo day.
+Those are exactly the carriers `buildOrderPayload` writes (`orderPayload.ts`). So PayPal **exposes** the
+merchant-authored fields, and the detectors have an input. What the spike cannot yet show is a
+transaction that *carries* them, because none of our payments have propagated yet.
+
+#### Why the approval screen "spun forever" — and why the browser is now optional
+
+The symptom was an infinite spinner on **Pay Now**, surviving incognito, a second browser, and correct
+credentials. It was never a payment failure.
+
+| What the spinner hid | What actually happened |
+|---|---|
+| looks identical | the payment was **approved**; only the redirect back to the merchant never fired |
+
+Two of three orders came back `APPROVED` with funds owed. The order's own status was unambiguous, cost
+one GET, and needed no browser at all.
+
+This is why `src/adapters/orderStatus.ts` exists and why `bun run capture` is a first-class command
+rather than a workaround:
+
+- **`APPROVED` is capturable server-side.** The demo's payment step no longer depends on the redirect
+  firing. That is a reliability win for `H5-01` rehearsal and for the video capture, not just a fix.
+- **The status disambiguates all three failure modes** the spinner conflates: buyer never confirmed a
+  funding source, risk silently rejected, or succeeded-but-no-redirect. Only the third is recoverable
+  without the browser.
+
+#### Transaction Search lags. Measure it, do not guess it.
+
+`/v1/reporting/transactions` is served from a cache. PayPal documents *"a maximum of three hours"*;
+developers report considerably worse, and the practical figure has been closer to a day.
+
+`bun run spike` now prints `last_refreshed_datetime` and the measured lag (`S-0-03b`). Without it,
+*"not seeded"* and *"will never be seeded"* look identical, and the only available strategy is to sleep
+and hope — which is precisely how this Spike was stalled before.
+
+PayPal's own guidance for a current transaction is explicit: **use the capture response, not Transaction
+Search.** That is exactly what `bun run capture` does, and it is why the capture ids above are known
+within seconds while the reporting API is still catching up.
 
 > Worth keeping: the currency in the product core is already threaded per row (§5, the
 > `["USD","INR"]` pass). That decision, made for a different reason in a different week, is why

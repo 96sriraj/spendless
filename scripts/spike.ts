@@ -14,6 +14,7 @@
 import { writeFileSync } from "node:fs";
 import { fieldInventory, findMerchantIdentity, IDENTITY_FIELDS, readTransactions } from "../src/adapters/inspect";
 import { chunkRange, mergeTransactions, PAYPAL_MAX_WINDOW_DAYS } from "../src/adapters/chunkRange";
+import { describeFreshness, readReportingFreshness, type ReportingFreshness } from "../src/adapters/freshness";
 import { readOAuthToken, refreshAfterSeconds, SANDBOX_BASE_URL } from "../src/adapters/token";
 
 const SANDBOX = SANDBOX_BASE_URL;
@@ -184,6 +185,7 @@ async function main(): Promise<void> {
     const inventories: string[] = [];
     let anyOk = false;
     let failure = "";
+    let lastFreshness: ReportingFreshness | null = null;
 
     for (const chunk of chunks) {
       const params = new URLSearchParams({
@@ -198,6 +200,10 @@ async function main(): Promise<void> {
       }
       anyOk = true;
       batches.push(readTransactions(body));
+      // Keep the most recent cache timestamp across the chunks: a chunked
+      // 90-day read can straddle a refresh, and the last chunk is the freshest.
+      const freshness = readReportingFreshness(body, Date.now());
+      if (freshness.lastRefreshed !== null) lastFreshness = freshness;
       const inventory = fieldInventory(body);
       if (inventory.length > 0 && inventories.length === 0) inventories.push(...inventory);
     }
@@ -223,6 +229,14 @@ async function main(): Promise<void> {
             ? "\nAn empty result is a valid answer for a fresh sandbox — create a plan and capture a payment (P4-01) before concluding anything."
             : ""),
       );
+
+      // How stale is this read? Transaction Search is cached and lags the
+      // capture API, so without this an empty or partial result is
+      // indistinguishable from a broken one — and the only available answer
+      // would be to sleep and hope. PayPal reports the cache time directly.
+      if (lastFreshness !== null) {
+        record("S-0-03b", "How far behind is Transaction Search right now?", "INFO", describeFreshness(lastFreshness));
+      }
 
       if (identity !== null) {
         const verdict = findMerchantIdentity({ transaction_details: [{ transaction_info: identity.raw }] });

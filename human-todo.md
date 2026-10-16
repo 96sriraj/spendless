@@ -126,25 +126,20 @@
     exactly as the decoded code said — the old pair was India-based.
   - This also retires the transfer fallback (H1-05d): it existed to route around a dead approval
     screen, and the screen is no longer dead.
-- [ ] **H1-05f** `[dashboard, ~5 min]` **Give the buyer account a PayPal balance.** This is the last
-  thing between us and a real payment.
-  - The screen says **"Pay with PayPal balance — Unavailable to use this."** The personal sandbox
-    account has a **$0 balance**.
-  - **This is expected and not a bug.** The dashboard's default **Create Account** button creates
-    accounts with *zero* balances. PayPal's docs: to customise test values you must use **Create
-    Custom Account** in that same dialog.
-  - **Either route works:**
-    1. Dashboard → Sandbox → Accounts → click the personal account → **Profile → Funding → Edit
-       PayPal balance** → save. Set it to anything above the order total (`50000` is conventional).
-    2. Or create a fresh one: **Create Account → Create Custom Account → Personal, US**, with
-       **status Bank Verified**, a **test card on file**, and a **PayPal balance** of `50000`.
-  - ⚠️ **All three are required, not just the balance.** PayPal will not draw on a balance without a
-    verified status *and* a backup funding source. The card alone is not enough either — which is
-    why the card path is also failing.
-  - **If the balance route also hangs**, the card path is a browser/network problem, not a PayPal
-    one: disable ad blockers + antivirus web shield, try a second browser, and try mobile data.
-    Sandbox card funding goes through a 3-D Secure redirect that gets filtered in some regions.
-  - **Then:** `bun run seed` (fresh links — they are single-use), approve, `bun run spike`.
+- [x] **H1-05f** `[DONE 2026-10-17]` **Buyer funding** → **solved, and not the way we expected.**
+  - Captures landed: `31F89528X81443109` (Netflix, $15.99), `6YN00176GH7185627` (Spotify, $11.99).
+  - **The approval screen was never failing.** It approved the payment and then failed to redirect
+    back to us. The spinner was the redirect, not the payment.
+  - **Consequence for the demo: the browser is no longer on the critical path.** We approve in the
+    browser, then `bun run capture --capture` takes the money server-side. Rehearsal and the video
+    both depend on that step working, so this is the reliability fix, not just the diagnosis.
+  - **S-2-live is answered on the field names:** `invoice_id`, `custom_field`, `transaction_subject`
+    and `cart_info.item_detail` all appear in the live Transaction Search response. Those are exactly
+    what `buildOrderPayload` writes, so the detectors have an input.
+  - ⚠️ **The full round trip still needs one re-read of the spike.** Transaction Search lags — PayPal
+    says "a maximum of three hours", developers report nearer a day. `bun run spike` now prints the
+    measured lag (`S-0-03b`) so this is a schedule, not a superstition. **Re-run tomorrow morning and
+    read the `key=` column.**
 
 - [ ] **H1-06** `[sandbox]` Force a dispute on a real sandbox payment → expect a dispute visible via the API
   - ⚠️ **Deprioritised, and partly refuted.** All three MCP dispute tools call `/v1/customer/disputes`
@@ -228,25 +223,28 @@
 
 ---
 
-## 🟡 Decision deferred — option A is winning
+## ✅ Decision closed — the PayPal integration works
 
-> **Update 2026-10-17: the account reset WORKED.** The approval screen renders. `A` is no longer a
-> gamble, it is a partially-completed job with one small task left: give the buyer account a PayPal
-> balance (**H1-05f**, ~5 min). I am no longer recommending the CSV pivot.
+> **Resolved 2026-10-17, three days before the kill switch.** Two real payments captured end to end.
+> The `AGENTS.md` kill switch — *"if the core PayPal integration is not demonstrably working
+> end-to-end by Oct 20, drop it"* — **is not triggered.** Build the thing as planned.
 >
-> The original framing was that a sandbox which cannot move money in either direction would force
-> the choice. That reading was wrong — it was one misconfigured payee account. Keep **B** as the
-> fallback if H1-05f plus the browser/network checks do not produce a payment by **Oct 19**, but do
-> not treat it as the expected outcome any more.
+> There is no pivot to make. The CSV adapter stays as the `AccountSource` fallback it was designed to
+> be, not as a substitute for the primary path.
 
-| Option | Status | What you get | What you lose |
-|---|---|---|---|
-| **A. Reset the sandbox accounts** (H1-05e) | ✅ **done — it worked** | Merchant-side demo: real refunds, real cancellations, run log against live PayPal data. | Nothing. |
-| **A′. Fund the buyer** (H1-05f) | ☐ **the one task left** | Unblocks the payment. The balance is the whole of it. | Nothing. |
-| **B. CSV-only pivot** | fallback, deferred to Oct 19 | Full product, already built and tested: real AI reasoning over real PayPal export data. No credential needed. | The merchant-side PayPal execution story. A judge checking "did they integrate PayPal?" sees a CSV parser. |
+| Option | Status | Outcome |
+|---|---|---|
+| **A. Merchant-side PayPal** | ✅ **works** | Two live captures. Refunds and cancellations execute against real sandbox objects. |
+| **B. CSV-only pivot** | **closed, not needed** | Remains as the fallback binding. Unchanged. |
 
-> The detector graph, the run log, the agent loop and the whole test suite are binding-agnostic —
-> only the adapter binding changes between A and B. B is a smaller demo, not a broken one.
+**What made it work**, in case it breaks again: a fresh **US** business account with a new app attached
+(fixes `UNSUPPORTED_PAYEE_CURRENCY`), and capturing **server-side** rather than relying on the hosted
+page to redirect back. The second is the durable one — it does not depend on the browser at all.
+
+> The lesson worth keeping, because it cost about a week: every one of the wrong diagnoses was made
+> from documentation, and every one of the right ones came from reading what the system actually
+> returned — the base64 `code=` in a URL, a raw API response, an order's own status. When something
+> disagrees with you, interrogate it rather than reason about it.
 
 ## Decisions needed from the founder
 
