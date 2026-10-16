@@ -253,17 +253,23 @@ async function main(): Promise<void> {
           "S-2-live",
           "Does a merchant-authored identity survive the round trip?",
           scan.identified.length > 0 ? "POSITIVE" : "NOT YET SEEDED",
-          `${scan.identified.length} of ${merged.length} rows carry a merchant-authored identity` +
+          `${scan.identified.length} of ${merged.length} rows carry a trustworthy identity` +
             (scan.identified.length > 0
               ? `\n\n${scan.identified
                   .map(
                     (row) =>
                       `  ${row.id}  ${row.eventCode}  ${row.amountCents}  "${row.merchantKey}"` +
-                      ` via ${row.identitySource}` +
-                      (row.subject === null ? "" : `  subject="${row.subject}"`),
+                      ` via ${row.identitySource}`,
                   )
                   .join("\n")}`
               : "\n\nnone — either too fresh for the cache, or not seeded") +
+            // Reported separately because it is a lead, not an answer. The live
+            // T1900 adjustment carries subject="Initial balance", and counting
+            // that as an identity produced a false POSITIVE once already.
+            `\n\nweak (free-text subject only, NOT a detector key): ${scan.weakOnly.length}` +
+            (scan.weakOnly.length > 0
+              ? `\n${scan.weakOnly.map((r) => `  ${r.id}  ${r.eventCode}  subject="${r.subject}"`).join("\n")}`
+              : "") +
             `\n\nreported on ${identity.id}: "${identity.merchantKey}" ` +
             `via ${verdict.foundIn ?? "nothing"} (${verdict.identitySource})\n` +
             `event_code=${identity.eventCode} amount=${identity.amountCents} ` +

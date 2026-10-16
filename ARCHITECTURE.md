@@ -591,6 +591,16 @@ Those are exactly the carriers `buildOrderPayload` writes (`orderPayload.ts`). S
 merchant-authored fields, and the detectors have an input. What the spike cannot yet show is a
 transaction that *carries* them, because none of our payments have propagated yet.
 
+> ⚠️ **The Spike reported `POSITIVE` once and was wrong.** It counted the T1900 adjustment as identified
+> because `transaction_subject` read `"Initial balance"` — PayPal populates that field on its own system
+> rows. The actual answer on that run was `"unknown" via unknown`. `TRUSTWORTHY_IDENTITY` already existed
+> and already excluded this carrier; the scan had reinvented its own criterion instead of using it.
+>
+> Recorded because a false POSITIVE is **worse than a false unknown**: it closes a question nobody
+> answered, and it did so on the single most load-bearing question in the project. The fix is three
+> buckets — `identified` / `weakOnly` / `unidentified` — where anything outside `TRUSTWORTHY_IDENTITY` is
+> untrustworthy *by default*, so a future source cannot silently become a detector key either.
+
 #### Why the approval screen "spun forever" — and why the browser is now optional
 
 The symptom was an infinite spinner on **Pay Now**, surviving incognito, a second browser, and correct
