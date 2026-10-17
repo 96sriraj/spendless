@@ -192,7 +192,7 @@ use.
     shown to list disputes *raised against* the merchant.
   - **Only spend time here after H1-05b succeeds.** If the seed does not produce a usable payment, the
     dispute lane is a distraction. Refund + cancel carry the "it acts" claim on their own.
-- [ ] **H1-07** `[decision]` Confirm the demo **persona**: merchant-side is the only executable binding. Is the product framed as "protect this merchant's revenue" or "here's what your data shows you, cancellation happens merchant-side"? → expect a written one-line framing
+- [x] **H1-07** `[DONE 2026-10-17]` Confirm the demo **persona**: merchant-side is the only executable binding. Is the product framed as "protect this merchant's revenue" or "here's what your data shows you, cancellation happens merchant-side"? → expect a written one-line framing
   - **Needed by Oct 18.** The agent rewrites the README in P8-05; your framing decides what it says.
   - ⚠️ **New constraint from §11a:** no PayPal API returns a *merchant* name to anyone. In the
     merchant-side framing the thing being protected is **this merchant's own subscription revenue**
@@ -206,8 +206,11 @@ use.
 
 - [x] **H2-01** `[openrouter.ai] Create an account and generate an API key** → expect a key that works at free-tier demo volume
   - Agent reads it server-side only (P8-02). **It never reaches the browser.**
-- [ ] **H2-02** `[openrouter.ai] Pick a cheap instruct model** → expect a shortlist of 1–2 candidates for P5-02
-  - A small model with a tight schema beats a large one wandering. Free tier is enough at demo volume.
+- [x] **H2-02** `[DONE 2026-10-17]` **Pick a cheap instruct model** → **`meta-llama/llama-3.1-8b-instruct`**
+  - Verified against `/api/v1/models`: $0.05/M in, $0.08/M out, 131k ctx. ~$0.001 per demo run.
+  - Upgrade to `mistralai/mistral-small-3.2-24b-instruct` only if proposals come back weak.
+  - ⚠️ `qwen/qwen3-8b` — the plausible-looking default — **does not exist** in the catalogue. Guessed
+    from memory; would have failed on first use. See D2.
 
 ## H3 — Cloudflare account — Day 2 · unblocks Phase 8
 
@@ -293,11 +296,50 @@ page to redirect back. The second is the durable one — it does not depend on t
 
 | # | Decision | Status | Needed by |
 |---|---|---|---|
-| D1 | Demo persona framing — merchant-side vs consumer narrative with merchant-side execution | ☐ open | **Oct 12** (H1-07) — changes the README |
-| D2 | Which OpenRouter model for the agent | ☐ open | Oct 18 (H2-02) |
+| **D1** | Demo persona framing | ✅ **CLOSED Oct 17 — "protect this merchant's revenue"** | — |
+| **D2** | OpenRouter model | ✅ **CLOSED Oct 17 — `meta-llama/llama-3.1-8b-instruct`** | — |
 | D3 | Hold the `*.workers.dev` subdomain or buy a domain | ☐ open | Nov 2 — **default: hold, do not buy** |
 | D4 | Pull the trigger if the Oct 20 kill switch fires | ✅ **closed — kill switch did not fire** | — |
 | **D5** | **How to demo recurrence, given live sandbox cannot produce it** | ✅ **CLOSED — founder chose BOTH (Oct 17)** | — |
+
+### D1 — the persona: protect this merchant's revenue
+
+**Chosen framing, one line:** *spendless protects this merchant's revenue by finding the
+subscriptions that are failing, disputed, or unused — and acting on them.*
+
+Chosen over *"here's what your data shows you"* because it is the stronger PayPal story **and** the
+more honest one. Three reasons, in order of how much they matter:
+
+1. **It is literally true of our data.** The detectors key on identity spendless itself wrote into
+   `invoice_id`/`custom_id`/`transaction_subject` at seed time. So the subject is *our merchant's own
+   plans and subscribers* — not a consumer's spending, which no PayPal API exposes.
+2. **It puts the "it acts" claim where it belongs.** Refund, cancel and dispute are all merchant-side
+   actions. A consumer narrative would have to explain why the actions happen on the merchant's
+   account anyway, which is the contradiction AGENTS.md flags.
+3. **It makes the hero metric legible.** "£63.96/year of Netflix you are not using" reads as revenue
+   protection; the same number under a consumer narrative reads as advice the user can decline.
+
+**Consequences to carry into the build — the README, the run log and the agent prompt must all use
+this framing consistently.** A demo that shows "protect your revenue" and then says "here's your
+spending" has failed its own first sentence.
+
+### D2 — the OpenRouter model
+
+**Default: `meta-llama/llama-3.1-8b-instruct`.** Verified against `/api/v1/models` on 2026-10-17:
+$0.05/M in, $0.08/M out, 131k context.
+
+Chosen because `AGENTS.md`'s reasoning holds: *a small model with a tight schema beats a large one
+wandering*. The agent classifies, ranks and drafts rationale — it never computes a figure or moves
+money — so it is not the quality bottleneck. Roughly $0.001 per demo run.
+
+**Upgrade path if proposals come back weak:** `mistralai/mistral-small-3.2-24b-instruct`
+($0.09/M in, $0.25/M out, 256k ctx). Same reasoning applies to both; the 24B is a strictly better
+reasoner for ~2x the price, which is still negligible at demo volume.
+
+> Worth recording that a plausible-sounding default — `qwen/qwen3-8b` — **does not exist** in the
+> catalogue. The ID was guessed from memory and would have failed on first use. Verified against the
+> live endpoint instead. Same lesson as the PayPal Spike: interrogate the system, do not reason about
+> it from memory.
 
 ### D5 — recurrence demo: both lanes, clearly labelled
 

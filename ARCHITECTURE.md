@@ -17,6 +17,30 @@ it stops that from happening.
 
 The demo runs **merchant-side**. See §2 — this is a scoping decision, not an accident.
 
+### 1a. The framing — locked 2026-10-17 (D1)
+
+**One line, to be used verbatim in the README, the run log and the agent's system prompt:**
+
+> spendless protects this merchant's revenue by finding the subscriptions that are failing,
+> disputed, or unused — and acting on them.
+
+Chosen over *"here's what your data shows you"*, for three reasons in order of weight:
+
+1. **It is literally true of our data.** The detectors key on identity spendless itself writes at seed
+   time (§11c). The subject is therefore *our merchant's own plans and subscribers* — not a
+   consumer's spending, which no PayPal API exposes to anyone.
+2. **It puts the "it acts" claim where the actions live.** Refund, cancel and dispute are all
+   merchant-side. A consumer narrative would have to explain why every action happens on the
+   merchant's account anyway — the exact contradiction `AGENTS.md` flags as still unresolved.
+3. **It makes the hero metric legible.** "$63.96/year of Netflix you are not using" reads as revenue
+   protection. The same number under a consumer framing reads as advice the merchant can decline, and
+   then nothing is lost by ignoring the product.
+
+> **Binding on the build.** The framing has to survive into three places at once: the README, the
+> rendered run log, and the agent's system prompt. A demo that opens with "protect your revenue" and
+> then narrates "here's your spending" has failed its own first sentence. Treat that as a defect, not
+> a wording nit — it is the same class of bug as an adapter reporting a failure as an empty list.
+
 ---
 
 ## 2. The central constraint
