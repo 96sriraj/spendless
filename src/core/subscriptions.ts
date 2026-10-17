@@ -88,6 +88,41 @@ export function buildSubscriptions(
       options.now.getTime() - recurrence.chargeCount * lastGapDays * DAY_MS,
     ).toISOString();
 
+    /**
+     * Anchored on the last charge, not on `now`.
+     *
+     * `now + gap` is correct only on the day the charge landed. For the rest of
+     * the cycle it is wrong by up to a full billing period, and the consequence
+     * is not cosmetic: `checkUnused` fires only inside `RENEWAL_WINDOW_MS`
+     * (7 days), so a subscription renewing in five days was reported as
+     * renewing in thirty and the headline finding could never be reached.
+     *
+     * Falls back to `now + gap` when there is no anchor, which is the best
+     * available answer and keeps a subscription without a parseable date from
+     * being silently dropped.
+     */
+    const anchorMs = recurrence.lastChargeAt === null
+      ? options.now.getTime()
+      : Date.parse(recurrence.lastChargeAt);
+    const anchor =
+      Number.isNaN(anchorMs) ? options.now.getTime() : anchorMs;
+    const nextRenewal = new Date(anchor + lastGapDays * DAY_MS).toISOString();
+
+    /**
+     * No roll-forward for a lapsed series, deliberately.
+     *
+     * If `anchor + gap` lands in the past, the subscription stopped charging and
+     * has no future renewal. Advancing it by whole cycles until it reaches the
+     * future would invent a renewal date for something that never renewed
+     * again — and a rolled-forward date *does* enter `checkUnused`'s window, so
+     * the product would go on to recommend a refund for a subscription that
+     * stopped being paid for months ago.
+     *
+     * The consequence is accepted instead: a lapsed series carries a past
+     * renewal, `checkUnused` skips it, and it stops appearing in the findings.
+     * That is the correct outcome. There is no money at risk on something the
+     * merchant is not being charged for.
+     */
     const candidate = {
       id: recurrence.merchantKey,
       /**
@@ -98,7 +133,7 @@ export function buildSubscriptions(
       amountCents: recurrence.medianAmountCents,
       currency,
       billingCycle: cycle,
-      nextRenewal: new Date(options.now.getTime() + lastGapDays * DAY_MS).toISOString(),
+      nextRenewal,
       category: "other",
       /** Always null. See the header — this is the one field that would lie. */
       lastUsedDate: null,

@@ -110,9 +110,15 @@ describe("buildSubscriptions", () => {
     expect(subs[0]?.lastUsedDate).toBeNull();
   });
 
-  it("projects the next renewal from the cadence rather than leaving it null", () => {
-    // A monthly subscription renews. A null `nextRenewal` means the renewal
-    // countdown - the one thing a merchant cares about - cannot be rendered.
+  /**
+ * A subscription renewing *today*.
+ *
+ * This test used to assert `daysAhead > 0`, and it passed only because of the
+ * `now + gap` bug it now documents. Last charged 30 days ago on a 30-day cycle
+ * is due today, and "due today" is a real state a merchant has to act on — it
+ * is inside `checkUnused`'s window, because that window is inclusive of zero.
+ */
+  it("projects a renewal that is due today, not one a cycle away", () => {
     const subs = buildSubscriptions(
       inferRecurrence([
         charge("sub-netflix", 90, 1_599),
@@ -123,9 +129,76 @@ describe("buildSubscriptions", () => {
     );
 
     const next = new Date(subs[0]?.nextRenewal ?? 0);
-    const daysAhead = Math.round((next.getTime() - NOW.getTime()) / DAY);
-    expect(daysAhead).toBeGreaterThan(0);
-    expect(daysAhead).toBeLessThanOrEqual(31);
+    expect(Math.round((next.getTime() - NOW.getTime()) / DAY)).toBe(0);
+  });
+
+  /**
+   * The bug these two tests exist for.
+   *
+   * The first version projected `nextRenewal = now + gap`. That is right exactly
+   * once per billing cycle — on the day the charge landed — and wrong for the
+   * other 29. A subscription renewing in five days was reported as renewing in
+   * 30, which put it outside `checkUnused`'s seven-day window and made the
+   * product's headline finding impossible to reach. The projection has to start
+   * from the last charge someone actually paid.
+   */
+  /**
+ * A lapsed subscription keeps its honest date.
+ *
+ * This test previously demanded that a renewal in the past be rolled forward
+ * into the future. That demand was wrong: a series that stopped charging has no
+ * future renewal, and inventing one would push a phantom date into
+ * `checkUnused`'s seven-day window so the product could go on recommending
+ * action on a subscription nobody is being charged for. The date stays where the
+ * data puts it, and the series simply stops producing findings — which is the
+ * correct outcome, because there is no money at risk on something that is not
+ * being billed.
+ */
+  it("leaves a lapsed renewal in the past, rather than inventing a future one", () => {
+    const subs = buildSubscriptions(
+      inferRecurrence([
+        charge("sub-lapsed", 190, 1_599),
+        charge("sub-lapsed", 160, 1_599),
+        charge("sub-lapsed", 130, 1_599),
+      ]),
+      { now: NOW, currency: "USD" },
+    );
+
+    // Still a subscription row — the history is real — but due 100 days ago.
+    const next = new Date(subs[0]?.nextRenewal ?? 0);
+    expect(Math.round((next.getTime() - NOW.getTime()) / DAY)).toBe(-100);
+  });
+
+  it("projects the renewal from the last charge, not from now", () => {
+    const subs = buildSubscriptions(
+      inferRecurrence([
+        charge("sub-soon", 85, 1_599),
+        charge("sub-soon", 55, 1_599),
+        charge("sub-soon", 25, 1_599),
+      ]),
+      { now: NOW, currency: "USD" },
+    );
+
+    // Last charge 25 days ago on a 30-day cycle: 5 days out, not 30.
+    const next = new Date(subs[0]?.nextRenewal ?? 0);
+    expect(Math.round((next.getTime() - NOW.getTime()) / DAY)).toBe(5);
+  });
+
+  it("puts a subscription charging today a full cycle away", () => {
+    // The boundary of the fix: anchored on the last charge, a charge that
+    // landed today genuinely is a month out. `now + gap` would agree here by
+    // luck, and asserting it keeps the fix from regressing into `now + gap`.
+    const subs = buildSubscriptions(
+      inferRecurrence([
+        charge("sub-fresh", 60, 1_599),
+        charge("sub-fresh", 30, 1_599),
+        charge("sub-fresh", 0, 1_599),
+      ]),
+      { now: NOW, currency: "USD" },
+    );
+
+    const next = new Date(subs[0]?.nextRenewal ?? 0);
+    expect(Math.round((next.getTime() - NOW.getTime()) / DAY)).toBe(30);
   });
 
   it("drops a series that is not yet recurring, rather than creating a subscription", () => {

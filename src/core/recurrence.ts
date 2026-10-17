@@ -46,6 +46,18 @@ export type Recurrence = {
   /** False until there are enough charges to be worth acting on. */
   readonly isRecurring: boolean;
   readonly chargeCount: number;
+  /**
+   * When the most recent charge landed, ISO 8601. Null when the series carries
+   * no parseable date.
+   *
+   * Present because a renewal cannot be projected without an anchor.
+   * `now + medianGapDays` is right only on the day the charge arrived; for the
+   * rest of the cycle it is wrong by up to a full billing period — and
+   * `checkUnused` only fires inside a seven-day window, so a merchant renewing
+   * in five days got reported as renewing in thirty and the finding became
+   * unreachable. The anchor is data, so it travels with the inference.
+   */
+  readonly lastChargeAt: string | null;
 };
 
 function median(values: readonly number[]): number {
@@ -97,6 +109,19 @@ export function analyse(series: Series): Recurrence {
   const medianAmountCents = median(series.amounts);
   const chargeCount = series.amounts.length;
 
+  /**
+   * Re-parsed rather than taken as `series.dates.at(-1)`: `dates` is sorted as
+   * ISO strings, and lexical order is not chronological order across offsets
+   * ("2026-01-01T00:00:00+05:00" sorts before "2025-12-31T20:00:00Z", which is
+   * the later instant). An unparseable date is dropped rather than anchored to.
+   */
+  const times = series.dates
+    .map((d) => Date.parse(d))
+    .filter((t) => !Number.isNaN(t))
+    .sort((a, b) => a - b);
+  const lastChargeMs = times[times.length - 1];
+  const lastChargeAt = lastChargeMs === undefined ? null : new Date(lastChargeMs).toISOString();
+
   const amountIsStable =
     series.amounts.length > 0 &&
     series.amounts.every(
@@ -123,6 +148,7 @@ export function analyse(series: Series): Recurrence {
     amountIsStable,
     isRecurring,
     chargeCount,
+    lastChargeAt,
   };
 }
 

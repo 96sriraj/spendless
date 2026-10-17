@@ -201,4 +201,57 @@ describe("recurrence — inferRecurrence", () => {
   it("should return nothing for an empty stream", () => {
     expect(inferRecurrence([])).toEqual([]);
   });
+
+  /**
+   * The field the renewal projection needs and did not have.
+   *
+   * Without `lastChargeAt` the only way to guess a renewal date is `now + gap`,
+   * which is correct exactly once per billing cycle — on the day the charge
+   * landed. A merchant is usually a few days *before* a renewal, and that is
+   * precisely the moment the product has something to say. So the last observed
+   * charge has to travel with the inference rather than be reconstructed.
+   */
+  describe("lastChargeAt", () => {
+    it("should report the most recent charge, not the median position", () => {
+      const result = inferRecurrence([
+        t("sub-a", "2026-01-05T00:00:00.000Z", 500),
+        t("sub-a", "2026-03-05T00:00:00.000Z", 500),
+        t("sub-a", "2026-02-05T00:00:00.000Z", 500),
+      ]);
+
+      expect(result[0]?.lastChargeAt).toBe("2026-03-05T00:00:00.000Z");
+    });
+
+    it("should report the last charge even when the series is not recurring", () => {
+      // A single charge has no gap and no cadence, but it still happened, and a
+      // caller reconstructing a renewal from it needs the date.
+      const result = inferRecurrence([t("sub-one", "2026-03-05T00:00:00.000Z", 500)]);
+
+      expect(result[0]?.lastChargeAt).toBe("2026-03-05T00:00:00.000Z");
+    });
+
+    it("should be null when a date in the series cannot be parsed", () => {
+      // A nonsense date is dropped from the gap calculation already. Carrying
+      // it forward as a renewal anchor would put a renewal in the year 5000.
+      const result = analyse({
+        merchantKey: "sub-bad",
+        currencyCode: "USD",
+        amounts: [500, 500],
+        dates: ["not-a-date"],
+      });
+
+      expect(result.lastChargeAt).toBeNull();
+    });
+
+    it("should be null for a series with no dates at all", () => {
+      const result = analyse({
+        merchantKey: "sub-empty",
+        currencyCode: "USD",
+        amounts: [],
+        dates: [],
+      });
+
+      expect(result.lastChargeAt).toBeNull();
+    });
+  });
 });
