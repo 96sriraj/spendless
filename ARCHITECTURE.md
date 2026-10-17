@@ -62,14 +62,20 @@ PayPal's official MCP server / agent toolkit exists and maps almost 1:1 onto thi
 Search v1 (`/v1/reporting/transactions`), which requires a business account and a per-app
 "Transaction Search" permission toggle. There is no supported consumer/personal-side read.
 
-> ⚠️ **Partly verified by desk research (§11a), still open for a live call.** Reading PayPal's
-> OpenAPI specs and the `@paypal/agent-toolkit` source confirms the structural half: every
-> transaction tool is merchant-scoped, and `create_refund` targets a capture the calling merchant
-> owns — so binding A is confirmed and binding B is not buildable through these APIs.
+> ✅ **Verified by live call (§11c, Oct 15–17).** A merchant business account with Transaction Search
+> enabled reads real transactions — 4 of them on the first run. The structural half was confirmed
+> before the call and held: every transaction tool is merchant-scoped, and `create_refund` targets a
+> capture the calling merchant owns — so binding A is confirmed and binding B is not buildable through
+> these APIs.
 >
 > **The binding-agnostic finding is the more important one:** no PayPal API returns a *merchant*
 > name to anyone. A merchant already knows its own name, so PayPal never returns it; a buyer has no
 > consumer-side read at all. §11a explains how the seed supplies identity instead.
+>
+> **And the live answer to S-2 was narrower than the plan assumed.** `invoice_id` and `custom_field`
+> are both present in the response, but neither carries our value on a real capture — only
+> `transaction_subject` round-trips. The detector key lives there. Anything that reads identity from
+> `invoice_id` is reading a field the API returns and silently ignores.
 
 ### The consequence, stated plainly
 
@@ -90,9 +96,11 @@ It has to be one of:
 **Decision: ship A, keep C as the consumer story.** One agent, one set of detectors, one action
 layer. Only the adapter binding changes. This is precisely why §3 exists.
 
-> **Action item:** the README's consumer framing needs to be reconciled with this. Either
-> reframe the demo around a merchant persona, or keep consumer framing and be explicit that
-> execution happens merchant-side. Do not leave the README implying B.
+> **D1 is CLOSED (Oct 17): the framing is "protect this merchant's revenue."** *Spendless protects
+> this merchant's revenue by finding the subscriptions that are failing, disputed, or unused — and
+> acting on them.* `README.md` has been corrected to match. A demo that opens with "protect your
+> revenue" and then narrates "here's your spending" has failed its own first sentence — treat that
+> as a defect, not a wording nit.
 
 ---
 
@@ -130,9 +138,15 @@ Three corrections, each forced by §11a rather than by taste:
 
 | Adapter | Binds | Notes |
 |---|---|---|
-| `McpPayPalAdapter` | `PAYPAL_ENVIRONMENT=SANDBOX` | Primary. Client-credentials, in-process. USD-only. Lossy: no `fields=all`, no `transaction_type`. |
-| `RestPayPalAdapter` | Same | Escape hatch for what the toolkit lacks — chiefly `fields=all` and `transaction_type`. |
-| `CsvAccountAdapter` | Consumer narrative | Parses PayPal activity export. Read-only. **The only adapter that carries real merchant identity**, because a consumer export *does* name the payee. |
+| `McpPayPalAdapter` | `PAYPAL_ENVIRONMENT=SANDBOX` | Primary. Client-credentials, in-process. USD-only. Lossy: no `fields=all`, no `transaction_type`. **Not built yet.** |
+| `RestPayPalAdapter` | Same | Escape hatch for what the toolkit lacks — chiefly `fields=all` and `transaction_type`. **Not built yet.** |
+| `CsvAccountAdapter` | Consumer narrative | Parses PayPal activity export. Read-only. **The only adapter that carries real merchant identity**, because a consumer export *does* name the payee. **Built and tested.** |
+
+**Status Oct 17.** The CSV adapter is real (`createCsvAccountSource`, `src/adapters/csv/`). Neither
+PayPal adapter exists yet — but the plumbing underneath one does: `stdioClient` and `mcpEnvelope`
+speak MCP to the real server, `tokenProvider` mints and refreshes, `chunkRange` enforces the 31-day
+split, `identityScan` and `inspect` read Transaction Search. `McpPayPalAdapter` is composition, not
+discovery. **No `ActionExecutor` exists at all**, so no refund or cancellation has ever been issued.
 
 **Rule: no module above this layer may import `openai`, `@paypal/agent-toolkit`, or `node:fs`.**
 That is the whole risk hedge in one seam. If MCP covers everything, delete the others and nothing
@@ -471,18 +485,23 @@ build depends on B being possible.
 
 ### 11b. Still requires a live sandbox call
 
-| # | Question | How | Blocks |
-|---|---|---|---|
-| **S-0-01/02/03** | Is the connected account a business account with Transaction Search enabled? Does `list_transactions` return anything at all in sandbox? | Enable `paypal-local`; call it. | Everything |
-| **S-2-live** | Does a merchant-written `invoice_id` actually appear as `transaction_info.invoice_id`? Does `custom_id` populate `custom_field`? **Which T-codes do subscription renewals emit?** | Create a plan + subscription, capture, re-query, dump fields verbatim. | Seed script (P4-01) |
-| **S-3-live** | Which of the 46 tools actually authenticate and succeed in sandbox? | Call each one. | Action layer scope |
-| **S-4-live** | Refund + cancel end to end? | `create_refund` on a capture. `cancel_subscription` on a live sub. | The "it acts" claim |
-| **S-0-04** | **Can merchant credentials touch `/v1/customer/disputes` at all?** Can a dispute be forced in sandbox? | Force one, then call it. | The dispute lane |
-| **S-0-05** | Real token TTL (docs say `expires_in: 32400` = 9h for sandbox, which contradicts the 3–8h in `AGENTS.md`) | Time it to a 401. | Token refresh (P3-07) |
+> **Updated Oct 17.** Most of this table is answered. The live calls in §11c answered S-0-01/02/03,
+> S-0-05 and S-2-live; §11a answered S-2 and S-3 by desk research. **Two rows remain genuinely open,
+> and both are money-out.** S-0-01 also remains open for a mechanical reason: `paypal-local` wants
+> `PAYPAL_ACCESS_TOKEN` exported, and the scripts mint their own from client credentials instead.
 
-**S-2-live is now the sharpest question, and it is a much smaller one than it was.** It is no
-longer "does the data support the detectors" — it is "does the field we are going to write come
-back". That is a five-minute test with a known answer either way.
+| # | Question | Status |
+|---|---|---|
+| **S-0-01/02/03** | Business account, Transaction Search enabled, `list_transactions` returns anything? | ✅ **Answered.** Business account, permission on, 4 transactions returned across 3 chunked calls. |
+| **S-2-live** | Does a merchant-written identity come back? | ✅ **Answered, negatively and narrowly.** Only `transaction_subject` survives; `invoice_id` and `custom_field` are returned but do not carry our value. |
+| **S-3-live** | Which of the 46 tools authenticate and succeed? | ⚠️ **Partly.** Refund and cancel are the two that matter for "it acts", and **neither has been called.** |
+| **S-4-live** | Refund + cancel end to end? | ❌ **OPEN — and it is the most load-bearing question left.** No code can issue either one. |
+| **S-0-04** | Can merchant credentials touch `/v1/customer/disputes` usably? | ⚠️ **Reachable (HTTP 200), not shown usable.** It is the buyer's namespace and does not list disputes *against* the merchant. Cut from the demo unless proven otherwise. |
+| **S-0-05** | Real token TTL | ✅ **Answered.** `expires_in=32400` = 9h, against the 3–8h in `AGENTS.md`. |
+
+**S-4-live is now the sharpest question, and it is not a research question.** Nothing about it is
+uncertain — a refund is one POST and the credentials are live. It simply has not been written. That
+is `todo.md` P7-01/P7-02, and until one succeeds, "it acts" is an aspiration rather than a claim.
 
 ### 11c. Live result — 2026-10-15, first real sandbox call
 
@@ -687,18 +706,21 @@ about identity. Worth having — but it must not be mistaken for the answer.
 
 ## 12. Build order
 
-| # | Task | Depends on |
-|---|---|---|
-| 1 | Replace `durableNotepad` with DB adapter; get the detector graph pure | — |
-| 2 | Copy the 9 files + 6 test files; get them green with zero mocks | 1 |
-| 3 | Currency pass → `["USD","INR"]` | 2 |
-| 4 | `McpPayPalAdapter`, in-process, sandbox | S-2, S-3 |
-| 5 | Seed-the-scenario script | 4 |
-| 6 | Run log persisted + rendered | 4 |
-| 7 | Agent: classify → rank → propose. No execution yet. | 2, 6 |
-| 8 | Action layer + approval UI | 7 |
-| 9 | Execution: refund, cancel. Guardrails on. **Dispute lane only if S-0-04 proves merchant credentials can reach it.** | S-4, 8 |
-| 10 | **Stretch:** expose spendless as an MCP server — cheap, and puts you in the MCP-server prize track | 9 |
+| # | Task | Depends on | Status (Oct 17) |
+|---|---|---|---|
+| 1 | Replace `durableNotepad` with DB adapter; get the detector graph pure | — | ✅ Done |
+| 2 | Copy the 9 files + 6 test files; get them green with zero mocks | 1 | ✅ Done |
+| 3 | Currency pass → `["USD","INR"]` | 2 | ✅ Done |
+| 4 | `McpPayPalAdapter`, in-process, sandbox | S-2, S-3 | 🟡 Plumbing only — client, envelope, token, chunking, identity scan. No adapter. |
+| 5 | Seed-the-scenario script | 4 | 🟡 `scripts/seed.ts` + `scripts/capture.ts` exist and have moved real money. Orders, not subscription plans — and plans cannot be backdated (see `AGENTS.md`, *the second gap*). |
+| 6 | Run log persisted + rendered | 4 | 🟡 Repository and e2e replay exist; nothing writes real steps yet, and nothing renders it. |
+| 7 | Agent: classify → rank → propose. No execution yet. | 2, 6 | ❌ Not started. This is the eligibility gate. |
+| 8 | Action layer + approval UI | 7 | ❌ Not started. |
+| 9 | Execution: refund, cancel. Guardrails on. **Dispute lane only if S-0-04 proves merchant credentials can reach it.** | S-4, 8 | ❌ Not started. **S-4-live is unanswered: nothing has issued a refund.** |
+| 10 | **Stretch:** expose spendless as an MCP server — cheap, and puts you in the MCP-server prize track | 9 | ❌ Not started |
+
+Steps 1–3 are complete and green. Everything from 7 down is untouched, which is why the honest
+summary of this project on Oct 17 is: **the deterministic core is finished, and the product is not.**
 
 Step 7 before 8 before 9 is deliberate: the agent produces *proposals* long before it can move
 money, so the demo degrades gracefully. A working "reads and reasons" demo beats a broken
