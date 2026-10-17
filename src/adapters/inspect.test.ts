@@ -221,6 +221,52 @@ describe("inspect — readTransactions", () => {
     });
   });
 
+  // RED on a real bug, found by the adapter that finally consumed this module.
+  //
+  // `readTransactions` called `findMerchantIdentity(detail)` — one row — while
+  // `findMerchantIdentity` reads the *envelope* and pulls
+  // `transaction_details[0]` out of it. Handed a detail it found no
+  // `transaction_details` key, returned the "unknown" verdict, and every row
+  // came back unattributed. The Spike never saw it because it called
+  // `findMerchantIdentity` itself, wrapping the row in an envelope first.
+  //
+  // It stayed invisible because every other assertion here covers a different
+  // field: amount, status, event code, raw, currency. Identity was the one
+  // field `readTransactions` was asked to resolve and the one nobody checked it
+  // on — which is exactly how a bug that silently returns `unknown` survives.
+  it("should resolve the merchant identity of each row", () => {
+    expect(readTransactions(RESPONSE)[0]).toMatchObject({
+      merchantKey: "sub-netflix",
+      identitySource: "seed_invoice_id",
+    });
+  });
+
+  it("should resolve identity per row, not once for the whole response", () => {
+    // Reading only the first detail is the mistake `identityScan.ts` was
+    // written to correct. Mapping a page of transactions has to resolve each
+    // row against that row.
+    const twoRows = {
+      ...RESPONSE,
+      transaction_details: [
+        RESPONSE.transaction_details[0]!,
+        {
+          ...RESPONSE.transaction_details[0]!,
+          transaction_info: {
+            ...RESPONSE.transaction_details[0]!.transaction_info,
+            transaction_id: "TXN0002",
+            invoice_id: "sub-spotify",
+            transaction_subject: seedMarker("sub-spotify"),
+          },
+        },
+      ],
+    };
+
+    expect(readTransactions(twoRows).map((r) => r.merchantKey)).toEqual([
+      "sub-netflix",
+      "sub-spotify",
+    ]);
+  });
+
   it("should skip a transaction with no amount rather than emit zero", () => {
     const broken = {
       ...RESPONSE,

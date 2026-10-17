@@ -103,16 +103,30 @@ export type IdentityVerdict = {
 };
 
 export function findMerchantIdentity(body: unknown): IdentityVerdict {
-  const unknownVerdict: IdentityVerdict = {
-    merchantKey: "unknown",
-    identitySource: "unknown",
-    foundIn: null,
-  };
-
   const details = firstDetail(body);
-  if (details === null) return unknownVerdict;
-  const info = asRecord(details["transaction_info"]);
-  if (info === null) return unknownVerdict;
+  if (details === null) return UNKNOWN_IDENTITY;
+  return identityOfDetail(details);
+}
+
+const UNKNOWN_IDENTITY: IdentityVerdict = {
+  merchantKey: "unknown",
+  identitySource: "unknown",
+  foundIn: null,
+};
+
+/**
+ * Identity for one `transaction_details` entry.
+ *
+ * Split out from `findMerchantIdentity` because the two operate on different
+ * shapes and conflating them is expensive: `findMerchantIdentity` takes the
+ * whole response envelope, this takes a single detail. Passing a detail to the
+ * envelope version reads as "no transactions here" and returns `unknown` for
+ * every row, which looks like PayPal withholding the field rather than a
+ * shape mismatch. Both call sites now go through here.
+ */
+function identityOfDetail(detail: Json): IdentityVerdict {
+  const info = asRecord(detail["transaction_info"]);
+  if (info === null) return UNKNOWN_IDENTITY;
 
   for (const { field, source } of IDENTITY_FIELDS) {
     const value = info[field];
@@ -134,7 +148,7 @@ export function findMerchantIdentity(body: unknown): IdentityVerdict {
 
   // "unknown" is the honest answer. Inventing a name would put a fabricated
   // merchant into a finding the user is being asked to act on.
-  return unknownVerdict;
+  return UNKNOWN_IDENTITY;
 }
 
 function firstDetail(body: unknown): Json | null {
@@ -225,7 +239,7 @@ export function readTransactions(body: unknown): RawTransaction[] {
       continue;
     }
 
-    const identity = findMerchantIdentity(record);
+    const identity = identityOfDetail(record);
     const currencyCode = readCurrencyCode(info["transaction_amount"]);
     // A transaction with no currency cannot be given a value honestly, and a
     // wrong currency is worse than a missing one: it corrupts every figure
