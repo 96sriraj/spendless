@@ -2,10 +2,17 @@
 
 **The AI agent that spends less, not more.** PayPal AI Hackathon entry (Devpost: [Build What's Next with PayPal and AI](https://paypalaihackathon.devpost.com)).
 
-> This repo is **pre-build as of 2026-10-09**: docs + config only, no `package.json`. Read
-> `README.md` (scope + business case) and `ARCHITECTURE.md` (how it gets built, in what order)
-> before writing code. Both are the source of truth — this file only records what an agent would
-> otherwise get wrong.
+> **Snapshot 2026-10-17.** Phases 1–2 are **done and green** (`bun run verify` = typecheck +
+> 471 tests). The PayPal sandbox account, app and credentials are **live**, and money has moved:
+> two orders captured server-side. Both credentials pass `bun run check-env`.
+> Read `README.md` (scope + business case) and `ARCHITECTURE.md` (how it gets built, in what
+> order) before writing code. Both are the source of truth — this file only records what an agent
+> would otherwise get wrong.
+>
+> **What is NOT built yet, and it is most of the product:** the agent (Phase 5), the action layer
+> and approval UI (Phase 6), execution — any `ActionExecutor` at all (Phase 7), and any UI or
+> deployment (Phases 4, 8). Do not assume a refund or cancellation has ever been issued; nothing in
+> this repo has issued one. `ActionExecutor` is an interface with zero implementations.
 >
 > **Work the queues:** [`todo.md`](./todo.md) is the agent lane, [`human-todo.md`](./human-todo.md)
 > is the founder lane. The agent lane blocks on anything marked 🔴 there (PayPal business account,
@@ -17,6 +24,10 @@
 - **Two hard eligibility requirements: meaningful PayPal integration *and* meaningful AI integration.** Stage-one judging is a pass/fail screen on exactly that. Never let either become a bolt-on.
 - **Submissions lock Nov 12, 2026, 12:00pm PT.** Public repo with an OSS licence file, run instructions *or* a hosted URL, and a **<3 min video**. `LICENSE` is already MIT and must never be removed.
 - **Kill switch: if the core PayPal integration is not demonstrably working end-to-end by Oct 20, drop it.** Do not spend Nov 1–12 polishing something that cannot make a real PayPal call.
+  - **Position Oct 17.** Read + capture are proven end to end. **Money-out is not**: no refund has
+    been issued, because no code can issue one. Treat "it acts" as **unproven until a real
+    `create_refund` lands** (S-4-live, `todo.md` P7-01). Do not describe the integration as working
+    end-to-end in the README, the run log, or the video until that call has succeeded.
 - **Judges judge from the video.** It must stand alone. Never assume anyone opens the live demo.
 - **Scope is frozen.** Anything not on the `ARCHITECTURE.md` §12 build-order table is out. Explicit non-goals: native mobile, Expo/React Native, RevenueCat, OneSignal, custom domain, a free-roaming autonomous agent, unbounded spend, multi-tenant auth, an ORM/query builder.
 
@@ -25,9 +36,21 @@
 Every PayPal MCP tool is **merchant-scoped**. `list_transactions` wraps Transaction Search v1, which needs a business account. A refund requires the credentials of the merchant that *captured* the payment — a buyer's agent cannot reverse a buyer's charge; the dispute flow runs the other way.
 
 - **Binding A (merchant-side) is the demo.** C (consumer-side via CSV, read-only) is the consumer narrative. **B (consumer-side execution via API) is not buildable.**
-- This is **inferred from docs, not verified** — that is Spike item S-1. Do not present it as settled fact, and do not rebuild the plan around it until a live sandbox call confirms it.
-- `README.md` still has consumer framing that implies B. That contradiction is a known open item. Do not resolve it by writing consumer-execution code.
-- **Spike S-1..S-4 gates everything.** S-2 (does `list_transactions` return merchant identity, amount, date, `custom_id`?) is the one that quietly kills projects — without merchant detail the lifted detectors have no input. Check it before anything else.
+- **This is now verified, not inferred.** S-2-live answered Oct 17: a merchant business account with
+  Transaction Search enabled reads real transactions. What survives the round trip is narrower than
+  the plan assumed — **only `transaction_subject`**; `invoice_id` and `custom_field` are returned by
+  the API but do not carry our value. The detector key therefore lives in the subject/description,
+  and the seed writes it there.
+- **No PayPal API returns a merchant name to anyone** (§11a, re-confirmed live). The subject of the
+  demo is a merchant's *own* subscription revenue — the plans and subscribers spendless itself
+  authored at seed time. **D1 is closed: "protect this merchant's revenue."** `README.md` has been
+  corrected to that framing. Do not reintroduce consumer framing, and never write consumer-execution
+  code.
+- **What the live sandbox has NOT proven:** money-out. No refund, no cancellation, no dispute
+  resolution has ever been executed. Refund + cancel carry the "it acts" claim and are S-4-live
+  (`todo.md` P7-01/P7-02). Reachability is not usability — the same mistake the dispute lane teaches.
+- **Sandbox tokens last 9 hours** (`expires_in=32400`, measured Oct 15). The 3–8h figure in the
+  docs below was wrong. Refresh at ~7h.
 
 ## Ports and adapters — the one seam that matters
 
@@ -37,7 +60,9 @@ Everything above the adapter layer depends on the `AccountSource` / `ActionExecu
 > That is the entire risk hedge. If MCP covers everything, delete the other adapters and nothing moves.
 
 - Primary adapter is **in-process** MCP (`npx -y @paypal/mcp --tools=all`, `PAYPAL_ACCESS_TOKEN`, `PAYPAL_ENVIRONMENT=SANDBOX`). Hosted `mcp.paypal.com` OAuth is a stretch goal, not the primary path.
-- Sandbox tokens live **3–8 hours**. Refresh proactively; never discover expiry mid-demo.
+- Sandbox tokens live **9 hours** (measured, `expires_in=32400`). Refresh proactively; never discover expiry mid-demo.
+- **What exists as of Oct 17:** `createCsvAccountSource` (real, tested, and the *only* adapter that names a payee — a consumer export does), plus the MCP plumbing underneath an adapter: `stdioClient`, `mcpEnvelope`, `tokenProvider`, `chunkRange`, `identityScan`, `inspect`, `orderPayload`, `orderStatus`, `seedMarker`, `freshness`.
+- **What does not exist:** `McpPayPalAdapter` itself, `RestPayPalAdapter`, and any `ActionExecutor`. `todo.md` P3-02 and P3-03 are open, and Phase 7 is the first time money leaves the account.
 - Dependencies point **downward only**: UI → run log → action layer → agent → core → adapters. The core imports nothing from layers above it.
 - Secrets (PayPal credentials, OpenRouter key) are **server-side only**. They never reach the browser.
 
@@ -49,6 +74,11 @@ The 9 files to lift verbatim from `D:\Github\nixt\src\lib\`: `money.ts` `dates.t
 
 Order matters (this is the build order, not a suggestion):
 
+> **Both steps are DONE (Oct 9).** `durableNotepad` → the `KVStore` port + D1 adapter landed in one
+> commit; `src/db/schema.sql` has real columns and no `kv` blob table. All 9 modules are lifted and
+> green with zero mocks, both lift defects are fixed, and currency is widened to `["USD","INR"]`.
+> Kept below because the invariants are still load-bearing, not because the work is pending.
+
 1. **First refactor, one commit:** replace `durableNotepad` (in Nixt: `src/store/durableNotepad.ts`) with a DB adapter. Five modules import its `kvGet`/`kvSet` — `insights.ts` (via `priceHistory.ts`), `unusedDetector.ts`, `priceHistory.ts`, `savingsLedger.ts`, `cancelIntent.ts`. Until this is done the detector graph is impure and untestable. Everything after is cheaper because of it.
 2. Do **not** port the `kv` blob table. Price history, usage events, savings events, and the action ledger get real columns.
 
@@ -59,7 +89,7 @@ Two invariants to preserve **deliberately, with a comment** — a refactor will 
 
 Fix on lift: `priceHistory.ts` renders raw cents in its title (no `/100`), and `confidence` is `number` on `DuplicateFlag`/`Recommendation` but the literal `"possibly"` on `UnusedFlag`. Normalise.
 
-**Currency is INR-hardcoded** in Nixt (`CurrencySchema = z.enum(["INR"])`, `en-IN` formatters, ₹1L/5L/10L milestones). **PayPal sandbox is USD.** Widen to `["USD","INR"]`, parameterise formatters, add USD milestones.
+**Currency was INR-hardcoded** in Nixt (`CurrencySchema = z.enum(["INR"])`, `en-IN` formatters, ₹1L/5L/10L milestones). **Fixed: widened to `["USD","INR"]`, formatters parameterised, USD milestones added.** (The sandbox merchant account settles in **USD** — read from the response by the spike's currency probe, not assumed.)
 
 Also carried over: raw SQL + zod (no ORM, deliberate), and the reusable CORS allow-list pattern from `D:\Github\nixt\worker\src\index.ts:42-57`.
 
@@ -70,10 +100,17 @@ Also carried over: raw SQL + zod (no ORM, deliberate), and the reusable CORS all
 - The LLM **classifies, reasons, ranks, and drafts rationale**. It does **not** compute a normalised monthly figure, decide a refund amount, or execute anything. Every figure on screen traces to a pure function in the core.
 - The natural insertion point: `cancelGuide.ts` falls back to `genericGuide(name)`, which fabricates a link. Nixt could not execute a cancellation so it shipped a URL; the agent replaces the weakest branch of an existing resolver with one that acts. That is the answer to "where exactly is the AI here?"
 - Use a cheap instruct model via **OpenRouter** with structured tool output. A small model with a tight schema beats a large one wandering.
+  - **D2 is closed: `meta-llama/llama-3.1-8b-instruct`** ($0.05/M in, $0.08/M out, 131k ctx, ~$0.001/demo run), verified against `/api/v1/models` on Oct 17. Upgrade to `mistralai/mistral-small-3.2-24b-instruct` only if proposals come back weak.
+  - ⚠️ `qwen/qwen3-8b` — the plausible-looking default — **is not in the catalogue**. It was guessed from memory. Verify model IDs against the live endpoint; never reason about them from memory.
+  - The key works: `bun run check-env` gets a real completion. **None of this is built yet** — Phase 5 is the whole agent.
 
 ## Actions and guardrails
 
 Every action is `proposal → approval → execution → result`, all four persisted. Refunds move money; an unreviewed autonomous refund is both a safety problem and a weak Design/Impact story.
+
+> **None of this exists yet** (Oct 17). There is no `src/actions/`, no approval UI, and no
+> `ActionExecutor` implementation. Treat every bullet below as a spec for Phase 6, not a description
+> of the code.
 
 - Hard configurable cap on refund amounts.
 - Prominent `SANDBOX` indicator in the UI, always.
@@ -158,6 +195,26 @@ PayPal transaction history contains recurrence, price, cadence, and gaps. It **c
 Product decision, not a bug: anchor to the renewal deadline and have the agent **ask** for `lastUsedDate` at the moment it matters. Do not fabricate a usage signal from transaction data.
 
 Also: `cancelGuideData.ts` has 26 guides, heavily India-first, and **zero PayPal-billed merchants**. Assume `genericGuide` covers most of the catalogue.
+
+### The second gap: the sandbox cannot produce recurrence at all
+
+Discovered Oct 17, and it constrains the demo rather than the code. `recurrence.ts` requires a
+**date gap** between charges, and every sandbox transaction is stamped at the moment of capture —
+PayPal offers no way to backdate one. Three charges in the same minute give gaps of `[0, 0]` →
+`irregular` → `isRecurring: false`. **No amount of seeding makes recurrence fire on live sandbox
+data.**
+
+**D5 is closed: demo all three lanes, and never blur which is which.**
+
+| Lane | Carries |
+|---|---|
+| Live sandbox | real reads, real identity round trip, and (from Phase 7) real refunds and cancels |
+| Seeded history in D1 | the multi-month date spread only history can provide, under the same merchant keys |
+| CSV | the consumer narrative — the only source naming a real payee |
+
+Seeded history is *ours*, and it is history — it is never presented as a live payment, and the UI must
+label it. This is a deliberate departure from `todo.md` P4-01's "real API calls, not hand-inserted
+rows", which was written before anyone knew PayPal cannot backdate.
 
 ## Toolchain (decided 2026-10-09)
 
