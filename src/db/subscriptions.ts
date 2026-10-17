@@ -81,6 +81,50 @@ export async function insertSubscription(db: Database, sub: Subscription): Promi
  * detector graph sees a stable input regardless of how rows were inserted -
  * `computeInsights` is deterministic, and this is half of why.
  */
+/**
+ * Insert, or refresh the fields that can be derived, keeping the rest.
+ *
+ * Separate from `insertSubscription` rather than a change to it: a plain insert
+ * is the right contract for a caller that means "this row is new", and several
+ * exist. This one exists because the read path re-derives every subscription on
+ * every request — the UI polls `/api/state` — so blind insertion fails on the
+ * second poll with a UNIQUE violation.
+ *
+ * `last_used_date`, `trial_end_date`, `annual_amount_cents`, `notes` and `name`
+ * are **preserved on conflict**. They are the fields a human or an agent
+ * supplied, and `ARCHITECTURE.md` section 8 is explicit that the product has no
+ * usage signal of its own — so a reconciliation pass that overwrote
+ * `last_used_date` with the derived `null` would erase the only usage data
+ * anyone ever had, and silently blank out the product's headline finding.
+ */
+export async function upsertSubscription(db: Database, sub: Subscription): Promise<void> {
+  const r = subscriptionToRow(sub);
+  await db.run(
+    `INSERT INTO subscriptions (${COLUMNS})
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET
+       amount_cents      = excluded.amount_cents,
+       currency          = excluded.currency,
+       billing_cycle     = excluded.billing_cycle,
+       next_renewal      = excluded.next_renewal,
+       category          = excluded.category,
+       updated_at        = excluded.updated_at`,
+    r["id"],
+    r["name"],
+    r["amount_cents"],
+    r["currency"],
+    r["billing_cycle"],
+    r["next_renewal"],
+    r["category"],
+    r["trial_end_date"],
+    r["last_used_date"],
+    r["annual_amount_cents"],
+    r["notes"],
+    r["created_at"],
+    r["updated_at"],
+  );
+}
+
 export async function listSubscriptions(db: Database): Promise<Subscription[]> {
   const rows = await db.all<Record<string, unknown>>(
     `SELECT ${COLUMNS} FROM subscriptions ORDER BY id`,

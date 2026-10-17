@@ -19,6 +19,7 @@
 
 import { useEffect, useState } from "react";
 import { formatMinor } from "./format";
+import { heroFigure, type StateResponse } from "./hero";
 import "./styles/tokens.css";
 import "./styles/base.css";
 import "./styles/app.css";
@@ -74,11 +75,28 @@ export function MoneyFigure({
   cents,
   currency,
   tone,
+  hidden,
 }: {
   readonly cents: number;
   readonly currency: string;
   readonly tone: "risk" | "recovered" | "ink";
+  /**
+   * Suppress the digits without suppressing the sentence.
+   *
+   * Used when the total spans currencies, or before the first response arrives. A
+   * confident `$0.00` in either case would be a claim, and this product's one
+   * rule is that a figure it cannot honestly state does not get stated.
+   */
+  readonly hidden?: boolean;
 }) {
+  if (hidden === true) {
+    return (
+      <span className="money money--pending" data-testid="money-figure">
+        &mdash;&mdash;
+      </span>
+    );
+  }
+
   return (
     <span className={`money money--${tone}`} data-testid="money-figure">
       {formatMinor(cents, currency)}
@@ -87,17 +105,16 @@ export function MoneyFigure({
 }
 
 /**
- * Placeholder content until step 1 wires the real read path.
+ * The screen. Three fetches' worth of state, one number, no router.
  *
- * The figure is 4,797 minor units, not 47,970. The first version of this file
- * had it ten times too high, and the only reason it was caught before anyone
- * else saw it is that the screenshot was actually looked at. Money figures do
- * not get reviewed by reading the code.
+ * `state` is the read model from `GET /api/state` — the real figure, computed on
+ * the server from rows in D1. It was `PLACEHOLDER_RISK_CENTS = 4_797` until this
+ * step: a constant that rendered convincingly, computed nothing, and that no test
+ * in the repository could have contradicted.
  */
-const PLACEHOLDER_RISK_CENTS = 4_797;
-
 export default function App() {
   const [health, setHealth] = useState<Health | null>(null);
+  const [state, setState] = useState<StateResponse | null>(null);
 
   useEffect(() => {
     // One fetch on mount, no polling, no library. A health check that re-runs
@@ -119,6 +136,31 @@ export default function App() {
     };
   }, []);
 
+  useEffect(() => {
+    // Read once per mount rather than polling. The figure changes when the
+    // merchant acts, and the actions are buttons they press — a poll would show
+    // a stale number immediately after a refund and read as a bug.
+    let cancelled = false;
+
+    void fetch("/api/state")
+      .then((r) => r.json() as Promise<StateResponse>)
+      .then((body) => {
+        if (!cancelled) setState(body);
+      })
+      .catch(() => {
+        // Left null, which renders as "Reading your account…". Swallowing it
+        // into an empty model would render a confident zero, which is the most
+        // misleading thing this screen is capable of showing.
+        if (!cancelled) setState(null);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const hero = heroFigure(state);
+
   return (
     <div className="app">
       <header className="bar">
@@ -127,10 +169,18 @@ export default function App() {
       </header>
 
       <main className="stage">
-        {/* The number. Display step, tabular figures, nothing competing with it. */}
         <section className="hero">
-          <MoneyFigure cents={PLACEHOLDER_RISK_CENTS} currency="USD" tone="risk" />
-          <p className="hero__sub">wasted every month on subscriptions nobody is using</p>
+          {/* The number. Display step, tabular figures, nothing competing with it. */}
+          <MoneyFigure
+            cents={hero.cents}
+            currency={hero.currency}
+            tone={hero.tone}
+            hidden={!hero.totalled}
+          />
+          <p className="hero__sub">{hero.headline}</p>
+          {hero.provenance !== null && (
+            <p className="hero__provenance">{hero.provenance}</p>
+          )}
           <p className="hero__note">
             The agent proposes. You decide. Nothing moves without you.
           </p>

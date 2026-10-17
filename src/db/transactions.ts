@@ -26,8 +26,17 @@ export type StoredTransaction = {
   readonly status: "completed" | "pending" | "denied" | "refunded";
   readonly capturedAt: string;
   readonly customId: string | null;
+  readonly lane: Lane;
   readonly raw: string | null;
 };
+
+export type Lane = "live_sandbox" | "seeded_history" | "csv";
+
+/**
+ * Which source produced a row. See the `lane` column's comment in `schema.sql`
+ * for why this is required rather than inferred.
+ */
+export const LANES: readonly Lane[] = ["live_sandbox", "seeded_history", "csv"];
 
 export type NewTransaction = {
   readonly id: string;
@@ -36,6 +45,8 @@ export type NewTransaction = {
   readonly currency: Currency | string;
   readonly capturedAt: string;
   readonly customId?: string | null;
+  /** Required. No default: a row that fails to declare its provenance is a row that will be shown as live. */
+  readonly lane: Lane;
   readonly direction?: "sale" | "refund";
   readonly status?: "completed" | "pending" | "denied" | "refunded";
   readonly raw?: unknown;
@@ -57,6 +68,7 @@ function toStored(row: Record<string, unknown>): StoredTransaction {
     status: String(row["status"]) as StoredTransaction["status"],
     capturedAt: String(row["captured_at"]),
     customId: row["custom_id"] === null ? null : String(row["custom_id"]),
+    lane: String(row["lane"]) as Lane,
     raw: row["raw"] === null ? null : String(row["raw"]),
   };
 }
@@ -77,8 +89,8 @@ export async function insertTransaction(
   await db.run(
     `INSERT OR IGNORE INTO transactions
        (id, subscription_id, merchant_name, merchant_id, amount_cents, currency,
-        billing_cycle, direction, status, captured_at, custom_id, raw)
-     VALUES (?, NULL, ?, NULL, ?, ?, NULL, ?, ?, ?, ?, ?)`,
+        billing_cycle, direction, status, captured_at, custom_id, lane, raw)
+     VALUES (?, NULL, ?, NULL, ?, ?, NULL, ?, ?, ?, ?, ?, ?)`,
     tx.id,
     tx.merchantName,
     tx.amountCents,
@@ -87,8 +99,17 @@ export async function insertTransaction(
     tx.status ?? "completed",
     tx.capturedAt,
     tx.customId ?? null,
+    tx.lane,
     tx.raw === undefined ? null : JSON.stringify(tx.raw),
   );
+}
+
+/** Every distinct lane present in the table, in declared order. */
+export async function listLanes(db: Database): Promise<Lane[]> {
+  const rows = await db.all<{ lane: string }>(
+    "SELECT DISTINCT lane FROM transactions ORDER BY lane",
+  );
+  return rows.map((r) => r.lane as Lane);
 }
 
 export async function listTransactions(db: Database): Promise<StoredTransaction[]> {

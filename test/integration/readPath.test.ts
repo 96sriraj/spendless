@@ -5,14 +5,17 @@ import BetterSqlite3 from "better-sqlite3";
 import { createSqliteD1 } from "../support/sqliteD1";
 import { createDatabase, type Database } from "@/db";
 import { listTransactions } from "@/db/transactions";
-import { insertSubscription, listSubscriptions } from "@/db/subscriptions";
+import { insertSubscription, listSubscriptions, upsertSubscription } from "@/db/subscriptions";
 import { createMemoryKvStore } from "@/db/memoryKvStore";
+import { createD1KvStore } from "@/db/kvStore";
 import { recordUsage } from "@/core/unusedDetector";
 import { seedHistory, reseedHistory, SCENARIO } from "@/services/seedHistory";
 import { buildSubscriptions } from "@/core/subscriptions";
 import { inferRecurrence } from "@/core/recurrence";
 import { computeInsights } from "@/core/insights";
+import { SubscriptionSchema } from "@/core/validators";
 import { seedMarker } from "@/adapters/seedMarker";
+import { buildReadModel } from "@/services/readModel";
 
 /**
  * The whole read path, end to end, against real SQL.
@@ -159,5 +162,169 @@ describe("the whole chain, from stored rows to a figure", () => {
     // honest zero rather than a screen that looks broken.
     const findings = await computeInsights(createMemoryKvStore(), [], NOW);
     expect(findings).toEqual([]);
+  });
+});
+
+/**
+ * `buildReadModel` is what `/api/state` answers from, so these are the API's
+ * contract tests: the shape the first screen is coded against, and the guarantees
+ * that keep the number on it honest.
+ */
+describe("the read model behind /api/state", () => {
+  it("derives subscriptions from stored rows, so no test data reaches the screen", async () => {
+    // The whole point of step 1. The previous behaviour was a hardcoded
+    // `PLACEHOLDER_RISK_CENTS = 4_797` in the client, which is a figure no
+    // function computed and no test could check.
+    await seedHistory(db, { now: NOW });
+    const model = await buildReadModel(db, NOW);
+
+    expect(model.subscriptions.length).toBeGreaterThan(0);
+    expect(model.transactionCount).toBe(SCENARIO.reduce((s, x) => s + x.charges, 0));
+  });
+
+  it("totals the figure from the findings, so the hero number is a sum of rows", async () => {
+    // Not restated, not rounded, not clamped. `savingCents` is the ranking axis
+    // and summing it is the only honest total - `displaySaving` is a formatted
+    // string for cards and would be nonsense to add up.
+    await seedHistory(db, { now: NOW });
+    const model = await buildReadModel(db, NOW);
+
+    const summed = model.findings.reduce((sum, f) => sum + f.savingCents, 0);
+    expect(model.totalRiskCents).toBe(summed);
+  });
+
+  it("is zero, not null, when there is nothing to report", async () => {
+    const model = await buildReadModel(db, NOW);
+
+    expect(model.totalRiskCents).toBe(0);
+    expect(model.findings).toEqual([]);
+    expect(model.subscriptions).toEqual([]);
+  });
+
+  it("labels every finding with the lane its data came from", async () => {
+    // D5, and the rule that keeps the product honest: history is ours, it is not
+    // a payment, and a figure derived from it must never be rendered as though
+    // PayPal reported it. A finding with no lane is undisplayable.
+    await seedHistory(db, { now: NOW });
+    const model = await buildReadModel(db, NOW);
+
+    for (const finding of model.findings) {
+      expect(finding.lane).toBe("seeded_history");
+    }
+  });
+
+  it("names the lanes that contributed, so an empty screen can explain itself", async () => {
+    await seedHistory(db, { now: NOW });
+    const seeded = await buildReadModel(db, NOW);
+    expect(seeded.lanes).toEqual(["seeded_history"]);
+
+    const bare = await buildReadModel(createEmptyDb(), NOW);
+    expect(bare.lanes).toEqual([]);
+  });
+
+  it("stamps when it ran, because a figure with no timestamp is not evidence", async () => {
+    await seedHistory(db, { now: NOW });
+    const model = await buildReadModel(db, NOW);
+
+    expect(model.generatedAt).toBe(NOW.toISOString());
+  });
+
+  it("is stable for a fixed clock, so a recorded demo does not drift", async () => {
+    await seedHistory(db, { now: NOW });
+    const first = await buildReadModel(db, NOW);
+    const second = await buildReadModel(db, NOW);
+
+    expect(second.totalRiskCents).toBe(first.totalRiskCents);
+    expect(second.findings.map((f) => f.subId)).toEqual(first.findings.map((f) => f.subId));
+  });
+
+  it("carries the usage signal through, so the designed finding is reachable", async () => {
+    // The end-to-end version of the chain test above, through the service the
+    // API actually calls. Without a recorded usage the screen is empty - and
+    // that is correct (§8), so the signal has to be in the store beforehand.
+    await seedHistory(db, { now: NOW });
+    await recordUsage(createD1KvStore(db), "sub-netflix", "2026-07-18T00:00:00.000Z");
+
+    const model = await buildReadModel(db, NOW);
+
+    expect(model.findings.map((f) => f.subId)).toContain("sub-netflix");
+    expect(model.totalRiskCents).toBeGreaterThan(0);
+  });
+});
+
+function createEmptyDb(): Database {
+  const sqlite = new BetterSqlite3(":memory:");
+  const fresh = createDatabase(createSqliteD1(sqlite));
+  sqlite.exec(readFileSync(path.join(REPO_ROOT, "src", "db", "schema.sql"), "utf8"));
+  return fresh;
+}
+
+describe("reconciling subscriptions", () => {
+  /**
+   * The field that must survive a re-derive.
+   *
+   * `buildSubscriptions` writes `lastUsedDate: null` unconditionally — correctly,
+   * since no usage signal exists in transaction data. So any reconciliation pass
+   * that overwrites that column with the derived `null` erases the only usage
+   * data anyone ever supplied, and the product's headline finding quietly stops
+   * appearing while the screen still looks correct.
+   */
+  it("preserves a recorded usage date when the derived row says null", async () => {
+    const sqlite = new BetterSqlite3(":memory:");
+    const store = createDatabase(createSqliteD1(sqlite));
+    sqlite.exec(readFileSync(path.join(REPO_ROOT, "src", "db", "schema.sql"), "utf8"));
+
+    const original = SubscriptionSchema.parse({
+      id: "sub-netflix",
+      name: "Netflix",
+      amountCents: 1_599,
+      currency: "USD",
+      billingCycle: "monthly",
+      nextRenewal: "2026-11-01T00:00:00.000Z",
+      category: "other",
+      lastUsedDate: "2026-07-18T00:00:00.000Z",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+    await insertSubscription(store, original);
+
+    // What `buildSubscriptions` would produce for the same merchant: same
+    // identity and amount, but no usage date, because it has no way to know one.
+    const derived = SubscriptionSchema.parse({
+      ...original,
+      lastUsedDate: null,
+      nextRenewal: "2026-10-22T00:00:00.000Z",
+      updatedAt: "2026-10-17T00:00:00.000Z",
+    });
+    await upsertSubscription(store, derived);
+
+    const [stored] = await listSubscriptions(store);
+    expect(stored?.lastUsedDate).toBe("2026-07-18T00:00:00.000Z");
+    // The derived column did move, or the upsert is not doing its job at all.
+    expect(stored?.nextRenewal).toBe("2026-10-22T00:00:00.000Z");
+  });
+
+  it("is safe to call repeatedly, because the UI polls /api/state", async () => {
+    const sqlite = new BetterSqlite3(":memory:");
+    const store = createDatabase(createSqliteD1(sqlite));
+    sqlite.exec(readFileSync(path.join(REPO_ROOT, "src", "db", "schema.sql"), "utf8"));
+
+    const sub = SubscriptionSchema.parse({
+      id: "sub-a",
+      name: "sub-a",
+      amountCents: 500,
+      currency: "USD",
+      billingCycle: "monthly",
+      nextRenewal: "2026-11-01T00:00:00.000Z",
+      category: "other",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+
+    await upsertSubscription(store, sub);
+    await upsertSubscription(store, sub);
+    await upsertSubscription(store, sub);
+
+    expect(await listSubscriptions(store)).toHaveLength(1);
   });
 });

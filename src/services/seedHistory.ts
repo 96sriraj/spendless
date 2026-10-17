@@ -42,7 +42,13 @@ import { clearTransactions, insertTransaction } from "@/db/transactions";
 import { seedMarker } from "@/adapters/seedMarker";
 import type { Currency } from "@/core/validators";
 
-/** Provenance stamped on every row this module writes. */
+/**
+ * Provenance stamped on every row this module writes.
+ *
+ * Not inferred from the `spendless:` marker: a live sandbox capture carries that
+ * marker too, so it would label real payments as history. This is the declared
+ * lane, and the UI reads it to say which of D5's three lanes a figure came from.
+ */
 export const HISTORY_LANE = "seeded_history" as const;
 
 export type HistorySubscription = {
@@ -126,6 +132,7 @@ export async function seedHistory(
         currency,
         capturedAt: new Date(options.now.getTime() - daysAgo * DAY_MS).toISOString(),
         customId: seedMarker(sub.key),
+        lane: HISTORY_LANE,
       });
       rows += 1;
     }

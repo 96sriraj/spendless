@@ -7,9 +7,9 @@
  * the same origin. If that holds locally it holds on `workers.dev`, and step 0's
  * gate — *the URL loads* — is a fact rather than an intention.
  *
- * Deliberately hand-rolled rather than a framework. One file, two routes, and
- * `AGENTS.md` is explicit that this project cannot afford a dependency that
- * changes shape three weeks before a submission.
+ * Deliberately hand-rolled rather than a framework. One file, and `AGENTS.md` is
+ * explicit that this project cannot afford a dependency that changes shape three
+ * weeks before a submission.
  *
  * ---------------------------------------------------------------------------
  * SECRETS STAY SERVER-SIDE BECAUSE OF WHERE THIS FILE SITS
@@ -28,8 +28,12 @@
  * and shown on stage.
  */
 
+import { createDatabase } from "../src/db";
+import { buildReadModel } from "../src/services/readModel";
+import { ensureSchema } from "./schema";
+
 export type Env = {
-  /** D1 binding. Absent locally until step 1 creates it. */
+  /** D1 binding. Absent when the account is not linked (H3 in human-todo.md). */
   DB?: D1Database;
   /** Never sent to the browser. */
   PAYPAL_CLIENT_ID?: string;
@@ -71,14 +75,52 @@ const routes: Record<string, Route> = {
     }),
 
   /**
-   * A shape for the client to code against before the data path exists.
+   * The real read path.
    *
-   * Empty rather than throwing. A 501 here would make the whole shell look
-   * broken on first run, and "nothing to show yet" is a different state from
-   * "this endpoint is not implemented" — the UI renders them differently.
+   * `PLACEHOLDER_RISK_CENTS` rendered convincingly and computed nothing — no test
+   * could have contradicted a constant typed into a component. This route runs
+   * the actual chain (`transactions → recurrence → subscriptions → insights →
+   * total`) over real D1 rows, so the headline figure is a sum of rows that
+   * arrived.
+   *
+   * Two behaviours are deliberate and both are contract-tested:
+   *
+   * - **No database is an empty model, not a 500.** H3 (`wrangler login`) is
+   *   still open, so an unbound `DB` is a realistic state on a demo machine. A
+   *   crash would take the first screen down for a configuration reason.
+   * - **The schema is applied on first use.** Every statement in `schema.sql` is
+   *   `IF NOT EXISTS`, so it is idempotent, and it runs once per isolate behind a
+   *   memoised promise. A demo that needs a manual migration step before it will
+   *   render is a demo that fails on the day.
    */
-  "GET /api/state": async () => json({ runId: null, findings: [], proposals: [] }),
+  "GET /api/state": async (_request, env) => {
+    if (env.DB === undefined) {
+      return json({ ...EMPTY_STATE, database: false });
+    }
+
+    const db = createDatabase(env.DB);
+    await ensureSchema(env.DB);
+    const model = await buildReadModel(db, new Date());
+
+    return json({ ...model, database: true });
+  },
 };
+
+/**
+ * What the client sees when there is nothing to compute from.
+ *
+ * `totalRiskCents: 0` rather than null: a zero is a real, renderable answer, and
+ * null would push the UI into inventing a figure to display instead.
+ */
+const EMPTY_STATE = {
+  generatedAt: null,
+  totalRiskCents: 0,
+  currency: null,
+  findings: [],
+  subscriptions: [],
+  lanes: [],
+  transactionCount: 0,
+} as const;
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {

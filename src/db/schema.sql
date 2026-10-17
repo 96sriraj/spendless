@@ -83,6 +83,13 @@ CREATE TABLE IF NOT EXISTS transactions (
                      CHECK (status IN ('completed', 'pending', 'denied', 'refunded')),
   captured_at      TEXT NOT NULL,
   custom_id        TEXT,
+  -- Which source this row came from. NOT NULL with no default, deliberately:
+  -- a row inserted without stating its provenance would be assumed live, and
+  -- the product would present seeded history as a payment PayPal reported. The
+  -- `spendless:` marker in custom_id cannot carry this: a live sandbox capture
+  -- carries that marker too, precisely so identity round-trips (ARCHITECTURE.md
+  -- section 11a). Provenance is a different question and gets its own column.
+  lane             TEXT NOT NULL CHECK (lane IN ('live_sandbox', 'seeded_history', 'csv')),
   raw              TEXT
 );
 

@@ -19,9 +19,16 @@ export default defineConfig({
     projects: [
       {
         // Pure modules. One file per module, colocated. ZERO mocks.
+        //
+        // `web/` is in scope because `web/hero.ts` is a pure function deciding
+        // what the headline *claims* — the one place on the client where a
+        // mistake costs real money. It is deliberately separate from `App.tsx`,
+        // which is untestable without a DOM and too thin to be worth one:
+        // fetching a response and putting it on screen has no logic in it. CSS
+        // imports are avoided here, which is why only pure modules are picked up.
         test: {
           name: "unit",
-          include: ["src/**/*.test.ts"],
+          include: ["src/**/*.test.ts", "web/**/*.test.ts"],
           environment: "node",
         },
       },

@@ -122,6 +122,25 @@
   color: var(--ink);
 }
 
+/*
+ * Shown in place of a number the product cannot honestly state — a total that
+ * spans currencies, or before the first response arrives. Muted rather than
+ * hidden, so the layout does not jump and the absence is visibly deliberate
+ * rather than looking like a rendering failure.
+ */
+.money--pending {
+  color: var(--faint);
+}
+
+.hero__provenance {
+  font-size: var(--step-small);
+  color: var(--muted);
+  /* The lane label is the difference between "PayPal told us this" and "we wrote
+     this ourselves". It sits directly under the figure, above the reassurance
+     line, because it qualifies the number rather than the pitch. */
+  margin-top: var(--gap-tight);
+}
+
 .hero__sub {
   font-size: var(--step-lead);
   /* Wide enough to set on two lines without orphaning a word. The first version
