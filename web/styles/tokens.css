@@ -118,3 +118,9 @@
     --duration-slow: 1ms;
   }
 }
+/*
+ * The one distance everything moves. Named so the motion layer cannot drift into
+ * five slightly different rises, which is what makes a page feel assembled from
+ * unrelated parts rather than designed.
+ */
+--rise: 10px;

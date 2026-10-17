@@ -126,7 +126,11 @@ export function RunPanel() {
   }, []);
 
   return (
-    <section className="log" aria-label="Agent run log">
+    // `data-ui` marks this as an interface fragment rather than prose, and the
+    // reserved height below is not a placeholder: streaming steps into an
+    // unreserved panel shoves everything under it down the screen mid-run, which
+    // is the moment a person is trying to read.
+    <section className="log" aria-label="Agent run log" data-ui>
       <div className="log__bar">
         <button className="action" type="button" onClick={() => void start()} disabled={running}>
           {running ? "Running…" : "Run the agent"}

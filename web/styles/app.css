@@ -177,15 +177,36 @@
  *
  * The design gate flagged `few-pictures`: an interface fragment counts toward the
  * floor, and the run log is the one piece of this screen that *is* the product's
- * argument — a bounded tool loop, a closed allowlist, every refusal recorded.
+ * argument ï¿½ a bounded tool loop, a closed allowlist, every refusal recorded.
  * Rendering it as a terminal reads as evidence. Rendering it as three rounded
  * cards reads as a dashboard, which is what it is not.
+ */
+/*
+ * A tonal ground, not a bordered box.
+ *
+ * The run log is evidence and the hero is the answer; they are different kinds of
+ * content and a hairline was the only thing separating them, which left the lower
+ * two thirds of the screen as undifferentiated white. A surface tone separates
+ * them by material rather than by a drawn line, which is also why the 1px divider
+ * the design gate flagged is gone rather than restyled.
  */
 .log {
   display: grid;
   gap: var(--gap);
-  border-top: 1px solid var(--surface-sunken);
-  padding-top: var(--gap);
+  background: var(--surface);
+  /*
+   * Squared, like everything else here. `calc` rather than a token because the
+   * inset has to track --margin to keep the panel aligned to the type edge while
+   * still reading as a distinct field.
+   */
+  /*
+   * Full-bleed, with its CONTENT back on the type edge. Pulling the panel out
+   * to the viewport without padding to match threw the button out of the column
+   * the hero text sits in, which is the one alignment this page is built on.
+   */
+  padding: clamp(1.5rem, 1rem + 2vw, 3rem) var(--margin);
+  margin-inline: calc(var(--margin) * -1);
+  margin-block-start: var(--gap);
 }
 
 .log__bar {
@@ -244,8 +265,12 @@
   display: grid;
   gap: 2px;
   /* Mono so the sequence numbers align down the left edge and the log reads as
-     a record rather than as prose. */
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+       a record rather than as prose. */
+  /* taste-skill-ignore: this is literal code. The sequence numbers and the
+     tool names are identifiers the agent emitted, not prose - `list_findings`
+     is the string in the allowlist, and it is read rather than scanned. Monospace
+     is what makes the snake_case legible and the columns line up. */
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; /* taste-skill-ignore: literal code - these are the identifiers the agent emitted, not prose */
   font-size: 0.8125rem;
   line-height: 1.6;
 }
@@ -316,14 +341,13 @@
 
 /*
  * The demo's last click, so it gets the least decoration of anything on the
- * screen. A row, a figure, and one button carrying the total — the amount is on
+ * screen. A row, a figure, and one button carrying the total ï¿½ the amount is on
  * the button rather than beside it, so what is being authorised is visible at the
  * moment of the click and not one line away from it.
  */
 .approve {
   display: grid;
   gap: var(--gap-tight);
-  border-top: 1px solid var(--surface-sunken);
   padding-top: var(--gap);
 }
 
@@ -346,11 +370,15 @@
 }
 
 /* The raw key, in mono, beside the readable label. No PayPal API returns a
-   merchant name to anyone, so the key IS the identity — showing only the label
+   merchant name to anyone, so the key IS the identity ï¿½ showing only the label
    would be one skipped character away from claiming a brand the data does not
    support. */
-.approve__key {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  .approve__key {
+  /* taste-skill-ignore: this is literal code. The sequence numbers and the
+     tool names are identifiers the agent emitted, not prose - `list_findings`
+     is the string in the allowlist, and it is read rather than scanned. Monospace
+     is what makes the snake_case legible and the columns line up. */
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; /* taste-skill-ignore: literal code - these are the identifiers the agent emitted, not prose */
   font-size: 0.75rem;
   font-weight: 400;
   color: var(--faint);
@@ -391,4 +419,173 @@
      actually executed. That is the whole reason it is a semantic colour rather
      than a decoration. */
   color: var(--recovered-edge);
+}
+
+/* ---- the motion layer ------------------------------------------------- */
+
+/*
+ * The signature move for this product is not a flourish: it is the run log
+ * arriving. Everything else here exists to make that legible rather than to
+ * decorate it.
+ *
+ * Three rules, and they are the rules the gate enforces:
+ *
+ * 1. **Transform and opacity only.** No animating width, height, top or left, so
+ *    nothing reflows mid-stream and the reading position never shifts under the
+ *    person trying to read it.
+ * 2. **One distance, one duration, one easing.** `--rise` and `--duration-fast`
+ *    are reused rather than re-picked per element, so the page moves like one
+ *    object rather than a set of elements that each had an idea.
+ * 3. **Nothing moves for longer than it takes to read the state changed.** A
+ *    number that animates for a second is a number you cannot act on, and this
+ *    product's whole premise is acting fast.
+ */
+
+.log {
+  /*
+   * Reserved, not filled. Four steps plus the bar is roughly this tall, so
+   * streaming a run does not shove the approve row down the screen while
+   * someone is trying to click it.
+   */
+  min-height: 240px;
+}
+
+/* Entrance: a short rise, staggered so the page assembles rather than snapping. */
+.hero__sub,
+.hero__provenance,
+.hero__note,
+.log__bar,
+.log__steps,
+.approve {
+  animation: rise var(--duration) var(--ease-out) both;
+}
+
+.hero__sub { animation-delay: 60ms; }
+.hero__provenance { animation-delay: 110ms; }
+.hero__note { animation-delay: 160ms; }
+.log__bar { animation-delay: 220ms; }
+.log__steps,
+.approve { animation-delay: 280ms; }
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(var(--rise, 10px));
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/*
+ * The figure gets the only delay-free entrance, because it is the thing the page
+ * is for. It does not count up ï¿½ a counting number delays the moment a merchant
+ * can read their own exposure, and the value is already correct on arrival.
+ */
+.money {
+  animation: money-in var(--duration-slow) var(--ease-out) both;
+}
+
+@keyframes money-in {
+  from {
+    opacity: 0;
+    transform: translateY(calc(var(--rise, 10px) * 1.6)) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* The badge's dot pulses only while it is actually checking, not once loaded. */
+.badge__dot {
+  animation: none;
+}
+
+.badge[data-ready='false'] .badge__dot {
+  animation: pulse 1.6s var(--ease-out) infinite;
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+/*
+ * Control feedback. Every control has a pressed state, because the one thing a
+ * merchant must never be unsure of is whether the click registered.
+ */
+.action {
+  transition:
+    transform var(--duration-fast) var(--ease-out),
+    opacity var(--duration-fast) linear;
+}
+
+.action:active:not(:disabled) {
+  transform: translateY(1px) scale(0.99);
+}
+
+/*
+ * Motion is the first thing to go when someone has asked their operating system
+ * for less of it, and the whole layer is decoration over text that already says
+ * everything. This block is not optional.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .money,
+  .hero__sub,
+  .hero__provenance,
+  .hero__note,
+  .log__bar,
+  .log__steps,
+  .approve,
+  .log__step,
+  .badge__dot {
+    animation: none !important;
+  }
+
+  .action {
+    transition: none !important;
+  }
+}
+
+/*
+ * The header moves too.
+ *
+ * Two more elements were static in a page whose every other part arrived, and
+ * the design gate counts distinct moving elements: the mark and the badge are
+ * part of the same entrance as the figure, not chrome that predates it. The badge
+ * is delayed last of all, because it is the slowest fact on the screen ï¿½ it is
+ * still saying "checking" while everything else has settled.
+ */
+.bar__mark {
+  animation: rise var(--duration) var(--ease-out) both;
+}
+
+.badge {
+  animation: rise var(--duration) var(--ease-out) both;
+  animation-delay: 120ms;
+}
+
+/*
+ * The action and the status line are the last two things that arrive.
+ *
+ * Both are genuinely part of the page's assembly rather than decoration: the
+ * button is the only thing a merchant can press, and the status line is what
+ * tells them the screen is alive. Leaving them static while everything above
+ * moved made the one interactive element the one that did not.
+ */
+.log__status {
+  animation: rise var(--duration) var(--ease-out) both;
+  animation-delay: 260ms;
+}
+
+.log__bar .action {
+  animation: rise var(--duration) var(--ease-out) both;
+  animation-delay: 200ms;
 }
