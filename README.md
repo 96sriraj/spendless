@@ -1,10 +1,18 @@
 # spendless
 
-**The AI agent that spends less, not more.**
+**The AI agent that protects recurring revenue.**
 
-An agent that reads your payment activity, works out what is quietly auto-renewing, decides what you do not actually use — and then *acts*: issues refunds, files disputes on charges you do not recognise, and executes cancellations.
+An agent that reads a merchant's PayPal activity, works out which subscriptions are failing, disputed, or quietly unused — and then *acts*: issues refunds, cancels plans, and resolves disputes. Every action is proposed, approved, and logged.
 
-> Status: **pre-build / planning**. No code yet. This README is the agreed scope.
+> Status: **in build, core complete** (Oct 2026). The detector engine is finished and tested; the
+> agent, the action layer and the UI are being built on top of it. **Sandbox only** — no live money
+> is ever moved.
+
+> **Why it is merchant-side.** PayPal's transaction and refund APIs are merchant-scoped: a refund
+> requires the credentials of the merchant that *captured* the payment, so no API lets a buyer's
+> agent reverse a buyer's charge. Spendless therefore operates on a merchant account it holds
+> credentials for, and protects **that merchant's** revenue. The consumer story survives as a read-only
+> mode over a PayPal CSV export.
 
 ---
 
@@ -61,8 +69,8 @@ The genuinely hard, already-built, already-tested parts — this is the head sta
 |---|---|
 | **Platform** | **Web-first. No React Native, no Expo, no EAS, no TestFlight, no App Store review.** Deploy = git push. |
 | **Payments sandbox** | PayPal sandbox (free, unlimited) |
-| **LLM provider** | **OpenRouter** (key already held) |
-| **Hosting** | Render / Cloudflare Workers free tier — `*.onrender.com` is a valid demo URL |
+| **LLM provider** | **OpenRouter** — `meta-llama/llama-3.1-8b-instruct` (key held, verified working) |
+| **Hosting** | Cloudflare Workers + D1 — a free `*.workers.dev` subdomain is a valid demo URL |
 | **Domain** | **None. Do not buy one.** |
 | **Direct cash cost** | **≈ ₹0** |
 | **Real cost** | Time only: ~80–120 hrs solo |
@@ -90,17 +98,26 @@ Devpost accepts a hosted URL *or* repo run instructions. A free subdomain is suf
 
 | Window | Milestone |
 |---|---|
-| **Oct 9–12** | **Go/no-go.** PayPal sandbox working; determine which APIs are actually reachable. |
-| Oct 13–19 | Core agent working end-to-end locally |
-| Oct 20–26 | Product surface + design polish |
+| **Oct 9–17** | ✅ **Spike + core.** Sandbox verified end to end, real payments captured, detector engine finished (471 tests green). |
+| Oct 18–20 | **Agent + action layer + approval.** The remaining critical path. |
+| Oct 20 | **Kill switch:** if a real refund cannot be issued by now, drop the PayPal execution story rather than polish around it. |
+| Oct 21–26 | UI surface + execution + design polish |
 | Oct 27 – Nov 2 | Deploy + reliability hardening |
-| Nov 3–8 | Demo video, README, `LICENSE`, submission text |
+| Nov 3–8 | Demo video, `LICENSE`, submission text |
 | Nov 9–11 | **Submit early** — Devpost locks the submission after Nov 12 |
 
-**Kill switch:** if by **Oct 20** the core PayPal integration is not demonstrably working end-to-end, drop it. Do not spend Nov 1–12 polishing something that cannot make a real PayPal call.
+### The risk that was on day 1 — resolved
 
-### Open risk to validate on day 1
-Whether transaction/activity data is programmatically readable in sandbox for the account type available. Merchant-side access is solid; **consumer/personal-side read access is more limited.** Fallback if blocked: merchant-side demo, or import a PayPal CSV export.
+> **Whether transaction/activity data is programmatically readable in sandbox for the account type
+> available.** Merchant-side access is solid; consumer/personal-side read access is more limited.
+
+**Resolved Oct 17, by calling it rather than reading about it.** A merchant business account with
+Transaction Search enabled reads real transactions. The answer was narrower than hoped in one
+specific place: of the identity fields spendless writes into a payment, only the transaction subject
+survives the round trip — `invoice_id` and `custom_field` come back from the API but do not carry
+our value. So identity moves to the field that works, and the detector engine reads it from there.
+The consumer narrative survives via the CSV adapter, which is read-only and does carry real payee
+names.
 
 ### Human work vs Nixt
 **~¼ of Nixt.** Everything expensive about Nixt is gone — no device QA, no store review, no push-on-device, no IAP sandbox. Split is roughly: 35% PayPal integration · 30% product & design · 20% demo & video · 15% deploy & reliability.
@@ -122,7 +139,8 @@ Worth playing even at those odds: the direct cost is zero, and we finish with a 
 
 ## Next steps
 
-1. Create the GitHub repo (public) and push this README.
-2. Add `LICENSE` (MIT).
-3. Oct 9–12: PayPal sandbox spike + go/no-go.
-4. Freeze scope. Build.
+1. ✅ Public repo, `LICENSE` (MIT), docs committed.
+2. ✅ PayPal sandbox spike + go/no-go — **passed Oct 17**, merchant-side.
+3. ✅ Deterministic core: 9 lifted detector modules, pure, zero mocks, 471 tests green.
+4. 🔜 **The agent**, then the action layer, then a real refund against a real capture.
+5. 🔜 Deploy to `*.workers.dev`, rehearse cold, record under 3 minutes.
