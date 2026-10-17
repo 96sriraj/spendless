@@ -45,11 +45,46 @@
 
 ---
 
-## H1 — PayPal: accounts and credentials — Day 1 · 🔴 MOSTLY DONE
+## ✅ Where the human lane actually stands — Oct 17
 
-> **H1-01 and H1-02 are done.** The remaining blocker is the token. Everything the agent lane needs
-> is one command away: `bun run spike` answers S-0-02/03, S-2-live, S-0-04, S-0-04b and S-0-05 and
-> writes `spike-result.md`.
+> **PayPal is done. Two live captures, identity round trip proven, kill switch not triggered.** The
+> items still unticked in this file are mostly unticked because nobody went back to edit them.
+
+### Done, and no longer needs you
+
+| Item | Outcome |
+|---|---|
+| H1-01/02 | Business developer account + sandbox app |
+| H1-03 | Transaction Search is **on** — proven, `spike` reads real transactions |
+| H1-04 | Credentials in shell; `bun run spike` runs green |
+| H1-05 | Buyer sandbox account exists |
+| H1-05b | Seeded and approved: `31F89528X81443109`, `6YN00176GH7185627` |
+| H1-05d | ~~transfer fallback~~ — **obsolete.** It existed to route around a dead approval screen; the screen is alive. |
+| H1-05e/05f | Account reset + buyer funding — both done |
+| **S-2-live** | **Answered.** Only `transaction_subject` survives; the key moved into `description`. |
+
+### 🔴 What genuinely blocks the agent lane — do these next
+
+| # | Item | Why it blocks |
+|---|---|---|
+| 1 | **H2-01** OpenRouter account + API key | **The AI half of the eligibility requirement.** `AGENTS.md`: two hard requirements, PayPal *and* meaningful AI. The PayPal half is proven; this is the other half, and Phase 5 cannot be built or honestly claimed without it. |
+| 2 | **H1-07** One-line demo persona | Decides what the README says. 2 minutes of thought. |
+| 3 | **Re-run `bun run seed`** | The two existing captures predate the marker fix, so they read as unidentified. New seeds carry `spendless:` in the description. Also gives you a third merchant. |
+
+### 🟡 Needed later, not yet blocking
+
+- **H3-01..04** Cloudflare account + D1 — blocks *deployment*, not building.
+- **H1-06** dispute — contingent, and `AGENTS.md` says cut it rather than fake it.
+- **H4** repo hygiene, **H5** rehearsal, **H6** video, **H7** Devpost.
+
+---
+
+## H1 — PayPal: accounts and credentials — Day 1 · ✅ COMPLETE
+
+> **All H1 blockers cleared Oct 17.** Kept for the record: the path here cost about a week and three
+> wrong diagnoses, all recorded in `ARCHITECTURE.md` §11c. The working method every time was decoding the
+> base64 `code=` in the failing URL and reading raw API responses — never reasoning from documentation,
+> which was wrong every single time.
 
 - [x] **H1-01** `[developer.paypal.com] Create a PayPal **Business** developer account` → **DONE Oct 16.** Business developer account exists.
 - [x] **H1-02** `[Developer Dashboard → Apps & Credentials → Sandbox]` Create the sandbox app → **DONE Oct 16.** Client ID and secret held.
