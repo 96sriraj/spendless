@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { seedMarker } from "./seedMarker";
 import {
   fieldInventory,
   findMerchantIdentity,
@@ -110,7 +111,12 @@ describe("inspect — findMerchantIdentity", () => {
     });
   });
 
-  it("should fall back to the subject, and say so, because it is not a key", () => {
+  it("should NOT treat a bare subject as an identity, because PayPal writes those too", () => {
+    // This assertion used to expect `transaction_subject: "Netflix Premium
+    // Monthly"` to resolve as an identity. That is what produced the false
+    // POSITIVE on the live Spike: PayPal populates `transaction_subject` on its
+    // own system rows, and the T1900 adjustment reads "Initial balance". A
+    // subject is free text and is only ours when it says so.
     const subjectOnly = {
       ...RESPONSE,
       transaction_details: [
@@ -125,8 +131,32 @@ describe("inspect — findMerchantIdentity", () => {
       ],
     };
     expect(findMerchantIdentity(subjectOnly)).toMatchObject({
-      merchantKey: "Netflix Premium Monthly",
-      identitySource: "transaction_subject",
+      merchantKey: "unknown",
+      identitySource: "unknown",
+    });
+  });
+
+  it("should resolve a subject that carries our seed marker, and name the source", () => {
+    // The only carrier measured to survive Orders v2 → Transaction Search.
+    const marked = {
+      ...RESPONSE,
+      transaction_details: [
+        {
+          ...RESPONSE.transaction_details[0]!,
+          transaction_info: {
+            ...RESPONSE.transaction_details[0]!.transaction_info,
+            invoice_id: "",
+            custom_field: "",
+            transaction_subject: `${seedMarker("sub-netflix")} — Netflix monthly plan`,
+          },
+        },
+      ],
+    };
+
+    expect(findMerchantIdentity(marked)).toMatchObject({
+      merchantKey: "sub-netflix",
+      identitySource: "seed_marker",
+      foundIn: "transaction_subject",
     });
   });
 

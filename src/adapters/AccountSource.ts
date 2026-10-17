@@ -43,10 +43,22 @@ export type DateRange = {
  * something a consumer CSV export contained.
  */
 export const IDENTITY_SOURCES = [
-  /** `invoice_id` — documented as "sent by the merchant with the transaction". Strongest. */
+  /** `invoice_id` — documented as "sent by the merchant with the transaction". */
   "seed_invoice_id",
   /** `custom_field` — "the merchant-provided custom text". */
   "seed_custom_field",
+  /**
+   * The marker we write into `purchase_units[].description`, read back out of
+   * `transaction_subject`.
+   *
+   * **This is the only carrier measured to survive** Orders v2 → Transaction
+   * Search (2026-10-17). The two above are documented and both come back empty.
+   *
+   * Distinct from the raw `transaction_subject` source: a subject only counts
+   * when it carries our namespace, so PayPal's own boilerplate and a merchant's
+   * free text are both correctly rejected. See `seedMarker.ts`.
+   */
+  "seed_marker",
   /** `transaction_subject` — a free-text description, not a key. Weak. */
   "transaction_subject",
   /** The payee name in a consumer activity export. Real, but only from CSV. */
@@ -61,6 +73,10 @@ export type IdentitySource = (typeof IDENTITY_SOURCES)[number];
 export const TRUSTWORTHY_IDENTITY: readonly IdentitySource[] = [
   "seed_invoice_id",
   "seed_custom_field",
+  // Trustworthy *because* it is namespaced, not because the field it came from
+  // is. Without the marker check this entry would reintroduce the false
+  // POSITIVE on the T1900 "Initial balance" row.
+  "seed_marker",
   "csv_payee",
 ];
 

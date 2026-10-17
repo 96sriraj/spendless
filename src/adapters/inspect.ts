@@ -18,6 +18,7 @@ import {
   type Currency,
 } from "@/core/validators";
 import type { IdentitySource, RawTransaction, TransactionStatus } from "./AccountSource";
+import { readSeedMarker } from "./seedMarker";
 
 type Json = Record<string, unknown>;
 
@@ -78,11 +79,20 @@ export function fieldInventory(body: unknown): string[] {
   return [...found].sort();
 }
 
-/** The fields a merchant can author, in descending order of trustworthiness. */
-export const IDENTITY_FIELDS: readonly { readonly field: string; readonly source: IdentitySource }[] = [
+/**
+ * The fields a merchant can author, in descending order of trustworthiness.
+ *
+ * Measured live 2026-10-17. `invoice_id` and `custom_field` both come back
+ * **empty** from Transaction Search, even though Orders v2 accepts them and
+ * `invoice_id` is documented as merchant-sent with the transaction. They are
+ * kept first because they are the documented carriers and would be the better
+ * answer if PayPal ever populated them - but nothing may depend on them today.
+ * `transaction_subject` is what actually survives.
+ */
+export const IDENTITY_FIELDS: readonly { readonly field: string; source: IdentitySource }[] = [
   { field: "invoice_id", source: "seed_invoice_id" },
   { field: "custom_field", source: "seed_custom_field" },
-  { field: "transaction_subject", source: "transaction_subject" },
+  { field: "transaction_subject", source: "seed_marker" },
 ];
 
 export type IdentityVerdict = {
@@ -107,6 +117,17 @@ export function findMerchantIdentity(body: unknown): IdentityVerdict {
   for (const { field, source } of IDENTITY_FIELDS) {
     const value = info[field];
     if (typeof value === "string" && value.trim().length > 0) {
+      // `transaction_subject` is free text, and PayPal populates it on its own
+      // system rows. It only counts as an identity when it carries our marker —
+      // see seedMarker.ts, and the false POSITIVE recorded in ARCHITECTURE.md
+      // §11c that this guard exists to prevent.
+      if (field === "transaction_subject") {
+        const seeded = readSeedMarker(value);
+        if (seeded !== null) {
+          return { merchantKey: seeded, identitySource: "seed_marker", foundIn: field };
+        }
+        continue;
+      }
       return { merchantKey: value.trim(), identitySource: source, foundIn: field };
     }
   }

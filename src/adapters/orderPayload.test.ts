@@ -4,6 +4,45 @@ import {
   ORDER_ITEM_CATEGORIES,
   SUBSCRIPTION_ITEM_CATEGORY,
 } from "./orderPayload";
+import { readSeedMarker, seedMarker } from "./seedMarker";
+
+describe("buildOrderPayload - the identity that actually survives", () => {
+  /**
+   * Measured live 2026-10-17: `invoice_id` and `custom_field` both come back
+   * EMPTY from Transaction Search. The description is the only carrier proven to
+   * round-trip, so this is where a regression would show up first.
+   *
+   * Deliberately an end-to-end check through the real builder rather than an
+   * assertion on the description string alone. The failure that actually
+   * happened was a field being set correctly and then dropped by PayPal, which
+   * no assertion inside the builder can catch.
+   */
+  it("should put the seed marker in the description, ahead of any human text", () => {
+    const unit = buildOrderPayload(NETFLIX).purchase_units[0]!;
+
+    expect(unit.description).toBe(`${seedMarker(NETFLIX.key)} — Netflix monthly plan`);
+  });
+
+  it("should write a description the reader resolves back to the same key", () => {
+    // The two halves, checked against each other. A marker format the reader
+    // cannot parse is worse than no marker at all: it looks like identity while
+    // resolving to nothing.
+    expect(readSeedMarker(buildOrderPayload(NETFLIX).purchase_units[0]!.description)).toBe(
+      NETFLIX.key,
+    );
+  });
+
+  it("should still set the documented carriers, even though they do not survive", () => {
+    // Kept because they are the documented carriers and would be the better
+    // answer if PayPal ever populated them. The description must never be
+    // dropped in their favour.
+    const unit = buildOrderPayload(NETFLIX).purchase_units[0]!;
+
+    expect(unit.invoice_id).toBe(NETFLIX.key);
+    expect(unit.custom_id).toBe(NETFLIX.key);
+    expect(unit.reference_id).toBe(NETFLIX.key);
+  });
+});
 
 const NETFLIX = { key: "sub-netflix", label: "Netflix", amountCents: 1599 };
 

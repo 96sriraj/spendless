@@ -11,6 +11,7 @@
  */
 
 import { DEFAULT_CURRENCY, type Currency } from "@/core/validators";
+import { seedMarker } from "./seedMarker";
 
 /** `item.category` per the Orders v2 schema. Exactly three values. */
 export const ORDER_ITEM_CATEGORIES = [
@@ -89,11 +90,24 @@ export type OrderPayload = {
 /**
  * Build the request body for one CAPTURE order.
  *
- * All three merchant-authored identity carriers are set on every purchase unit
- * — `invoice_id`, `custom_id` and the item `name`. PayPal returns only
- * merchant-authored fields in Transaction Search, so whichever of these
- * survives the round trip is the detector graph's identity. Setting all three
- * answers the question whichever way it lands.
+ * All three merchant-authored identity carriers are set on every purchase unit —
+ * `invoice_id`, `custom_id` and the item `name`. **Measured live 2026-10-17:**
+ * only the `description` survives into Transaction Search; `invoice_id` and
+ * `custom_field` come back empty. The other two are still set, because they are
+ * the documented carriers and would be the better answer if PayPal populated
+ * them, but nothing depends on them.
+ *
+ * The `description` therefore leads with the seed marker, which is the one
+ * carrier proven to round-trip. The human-readable label follows it, so the
+ * field still reads sensibly in the PayPal dashboard and in the video:
+ *
+ * ```text
+ *   spendless:sub-netflix — Netflix monthly plan
+ * ```
+ *
+ * The key must come first and unparsed. Recovering `sub-netflix` from
+ * `"Netflix monthly plan"` would be a lookup table wearing a disguise, and it
+ * would silently start missing rows the first time a label was ambiguous.
  *
  * The amount breakdown is derived, never hand-written: the schema requires
  * `item_total` to equal the sum of every line, and a mismatch is a 422 that
@@ -119,7 +133,9 @@ export function buildOrderPayload(
         reference_id: entry.key,
         invoice_id: entry.key,
         custom_id: entry.key,
-        description: `${entry.label} monthly plan`,
+        // Marker first, label second. See the note above: this field is the only
+        // one measured to survive, so it has to carry the key itself.
+        description: `${seedMarker(entry.key)} — ${entry.label} monthly plan`,
         amount: {
           currency_code: currency,
           value: total,

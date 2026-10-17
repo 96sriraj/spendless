@@ -571,35 +571,50 @@ The method that actually worked each time was **decoding the base64 `code=` and 
 response**, never reasoning from documentation. §11a exists because the docs were actively
 misleading here.
 
-#### S-2-live: the identity carriers are CONFIRMED readable. The round trip is pending only on cache lag
+#### S-2-live: SOLVED. Only `transaction_subject` survives, so the key goes there
 
-**Payments captured 2026-10-17.** `31F89528X81443109` and `6YN00176GH7185627`, via
-`bun run capture --capture`. This is the `AGENTS.md` kill-switch criterion met three days early: the core
-PayPal integration works end to end — create order, buyer approves, we capture, money moves.
+**Answered 2026-10-17, from a real capture read back through Transaction Search.** Both captures are
+visible now (`31F89528X81443109`, `6YN00176GH7185627`, both `T0006`), and the answer is not the
+documented one:
 
-**The identity question is settled, and not by the spike's read yet.** Transaction Search returned these
-field names in the live response:
+| Carrier written at seed time | Round trip |
+|---|---|
+| `purchase_units[].invoice_id` → `transaction_info.invoice_id` | ❌ **empty** |
+| `purchase_units[].custom_id` → `transaction_info.custom_field` | ❌ **empty** |
+| `purchase_units[].description` → `transaction_info.transaction_subject` | ✅ **survives** |
 
+```text
+31F89528X81443109  T0006  subject="Netflix monthly plan"
+6YN00176GH7185627  T0006  subject="Spotify monthly plan"
+647530330R035101U  T1900  subject="Initial balance"     ← PayPal's own text, not ours
 ```
-transaction_info.invoice_id
-transaction_info.custom_field
-transaction_info.transaction_subject
-cart_info.item_detail
+
+**Orders v2 accepts `invoice_id` and `custom_id` and the reporting API drops them.** `invoice_id` is
+documented as *"sent by the merchant with the transaction"* — it is documented, it validates, and it
+arrives empty. This is precisely what the Spike existed to find, and it is not the answer the
+documentation would have given you. Both carriers are still written, because they would be the better
+answer if PayPal populated them, but nothing depends on them.
+
+**So the identity moves into `description`,** which is the one field proven to round-trip:
+
+```text
+spendless:sub-netflix — Netflix monthly plan
 ```
 
-Those are exactly the carriers `buildOrderPayload` writes (`orderPayload.ts`). So PayPal **exposes** the
-merchant-authored fields, and the detectors have an input. What the spike cannot yet show is a
-transaction that *carries* them, because none of our payments have propagated yet.
+Two rules make that safe rather than a guess:
 
-> ⚠️ **The Spike reported `POSITIVE` once and was wrong.** It counted the T1900 adjustment as identified
-> because `transaction_subject` read `"Initial balance"` — PayPal populates that field on its own system
-> rows. The actual answer on that run was `"unknown" via unknown`. `TRUSTWORTHY_IDENTITY` already existed
-> and already excluded this carrier; the scan had reinvented its own criterion instead of using it.
->
-> Recorded because a false POSITIVE is **worse than a false unknown**: it closes a question nobody
-> answered, and it did so on the single most load-bearing question in the project. The fix is three
-> buckets — `identified` / `weakOnly` / `unidentified` — where anything outside `TRUSTWORTHY_IDENTITY` is
-> untrustworthy *by default*, so a future source cannot silently become a detector key either.
+1. **The key comes first and unparsed.** Recovering `sub-netflix` from `"Netflix monthly plan"` is a
+   lookup table wearing a disguise — it breaks on the first ambiguous name and silently starts missing
+   rows.
+2. **Trust is derived from a namespace, not from the field.** `transaction_subject` is free text and
+   PayPal populates it on its own rows — that `"Initial balance"` above is the proof. A subject only
+   counts as an identity when it carries `spendless:` (`seedMarker.ts`). This is what lets it sit in
+   `TRUSTWORTHY_IDENTITY`, and it is the same guard that prevents the false POSITIVE below recurring.
+
+> The `weak (free-text subject only)` bucket that appeared in the first post-capture run was this
+> module working: the two real payments were detected, recognised as *not yet* carrying a seed key, and
+> reported as such rather than being counted as identified. They landed in `weak` because at that point
+> the seed had not been writing markers yet.
 
 #### Why the approval screen "spun forever" — and why the browser is now optional
 
