@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <!--
+      viewport-fit=cover so the layout can reach the safe area on a phone in a
+      demo, and `maximum-scale` deliberately NOT set: pinch-zoom is an
+      accessibility feature, and disabling it to stop a stray double-tap is a
+      trade this app should refuse.
+    -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="light" />
+    <meta
+      name="description"
+      content="spendless finds the subscriptions a merchant is losing money on, and acts on them after you say yes."
+    />
+    <title>spendless</title>
+
+    <!--
+      Self-hosted fonts, preloaded.
+
+      No Google Fonts or fontshare request at runtime, deliberately. This app
+      gets shown on conference wifi, and a page that renders in a fallback
+      typeface because a CDN timed out looks broken in a way that is hard to
+      explain live. The woff2 files are downloaded at build time into
+      `web/public/fonts`.
+    -->
+    <link rel="preload" href="/fonts/Switzer-1.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="stylesheet" href="/fonts/switzer.css" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <!--
+      The entry is in `web/` while this file is at the repository root. That is
+      not a preference: `@cloudflare/vite-plugin` resolves the Worker's `main`
+      relative to Vite's root, so moving this file into `web/` too would make
+      the plugin look for `web/worker/index.ts` and silently emit a build with no
+      Worker in it. The symptom is a working SPA whose every API call 404s.
+    -->
+    <script type="module" src="/web/main.tsx"></script>
+  </body>
+</html>

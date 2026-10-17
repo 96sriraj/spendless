@@ -4,7 +4,10 @@
   // because the codebase is small enough to hold to them.
   "compilerOptions": {
     "target": "ES2022",
-    "lib": ["ES2023"],
+    // DOM is here for the client. It was absent while the repo was pure server
+    // code, and adding `web/` means `Request`, `Response` and `fetch` have real
+    // types rather than `any` — which matters here, because the Worker entry
+    // and the client both speak them.
     "module": "ESNext",
     "moduleResolution": "bundler",
     "moduleDetection": "force",
@@ -26,13 +29,29 @@
 
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
-    "types": ["node"],
+    "jsx": "react-jsx",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    // `types` is where the two halves of this repo meet: Node types for the
+    // scripts and the test harness, Workers types for the adapters and the
+    // Worker entry. One `tsc --noEmit` stays the gate rather than two configs
+    // that can disagree.
+    "types": ["node", "vite/client", "@cloudflare/workers-types"],
 
     "baseUrl": ".",
     "paths": {
       "@/*": ["./src/*"]
     }
   },
-  "include": ["src/**/*.ts", "test/**/*.ts", "scripts/**/*.ts", "*.mts"],
+  "include": [
+    "src/**/*.ts",
+    "web/**/*.ts",
+    "web/**/*.tsx",
+    "worker/**/*.ts",
+    "test/**/*.ts",
+    "test/**/*.tsx",
+    "scripts/**/*.ts",
+    "*.ts",
+    "*.mts"
+  ],
   "exclude": ["node_modules", "dist", ".wrangler", ".vitest"]
 }

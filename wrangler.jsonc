@@ -1,0 +1,39 @@
+{
+  // Wrangler configuration. `wrangler types` generates the `Env` type in
+  // worker/index.ts from this file, so a secret added here shows up there as a
+  // type error until something handles it.
+  //
+  // Nothing here holds a value. PayPal and OpenRouter credentials are set with
+  // `wrangler secret put` and live only in Cloudflare's vault — AGENTS.md:
+  // "Secrets are server-side only. They never reach the browser."
+
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "spendless",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-10-17",
+  "compatibility_flags": ["nodejs_compat"],
+
+  "observability": {
+    // Top-level alone does not enable traces; both are needed. The run log is
+    // the demo's evidence, and a Worker that fails on stage with no trace is an
+    // afternoon of guessing.
+    "enabled": true,
+    "traces": { "enabled": true }
+  },
+
+  "assets": {
+    "directory": "./dist",
+    // A deep link serves index.html rather than a 404.
+    "not_found_handling": "single-page-application",
+    // Everything except /api/* is served from the CDN without invoking the
+    // Worker at all.
+    "run_worker_first": ["/api/*"]
+  },
+
+  // D1. The database_id is deliberately absent — H3-03 in human-todo.md is
+  // still open, and a committed placeholder would be a fake. `wrangler d1
+  // create spendless` prints the id to paste here.
+  //
+  // "d1_databases" commented out rather than guessed: an empty binding id makes
+  // every request fail in a way that looks like a code bug.
+}

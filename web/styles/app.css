@@ -1,0 +1,153 @@
+/*
+ * The first screen.
+ *
+ * Geometry only — colour, type and motion come from tokens.css, and this file
+ * is not allowed an opinion about either. Two zones: a status bar and a stage.
+ * That is the whole layout, and it is deliberate: every element competing for
+ * attention is an element the one button has to fight.
+ *
+ * Corner radius is 0 everywhere (one decision, from tokens) and there are no
+ * shadows at rest, no gradients and no hairline rules. Surfaces are separated by
+ * a step in tone, which reads as structure without adding an edge to look at.
+ */
+
+.app {
+  min-height: 100svh;
+  display: grid;
+  grid-template-rows: auto 1fr;
+}
+
+/* ---- the bar --------------------------------------------------------- */
+
+.bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gap);
+  padding: 0 var(--margin);
+  min-height: 56px;
+}
+
+.bar__mark {
+  font-weight: 600;
+  letter-spacing: var(--tracking-tight);
+  font-size: var(--step-body);
+}
+
+/* ---- the SANDBOX badge ----------------------------------------------- */
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  /* A filled pill, not an outlined one. An outline on a light ground reads as
+     a disabled control, and this is the one thing on screen that must never
+     look disabled. */
+  padding: 0.35rem 0.75rem;
+  border-radius: 999px;
+  background: var(--ink);
+  color: var(--bg);
+  font-size: var(--step-small);
+  letter-spacing: 0.04em;
+}
+
+.badge__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--recovered);
+  flex: none;
+}
+
+/* Honest about not being ready. A badge that is always green is a decoration. */
+.badge[data-ready="false"] {
+  background: var(--surface-sunken);
+  color: var(--muted);
+}
+
+.badge[data-ready="false"] .badge__dot {
+  background: var(--faint);
+}
+
+.badge__label {
+  font-weight: 600;
+}
+
+.badge__detail {
+  /* The lowercase, untracked phrasing of the house style. "No live money
+     moves" is doing more work than a badge shape is. */
+  letter-spacing: 0;
+  opacity: 0.85;
+}
+
+/* ---- the stage ------------------------------------------------------- */
+
+.stage {
+  display: grid;
+  align-content: start;
+  gap: var(--gap-section);
+  padding: var(--gap-section) var(--margin) var(--gap-section);
+  max-width: 1100px;
+  width: 100%;
+}
+
+/* ---- the hero -------------------------------------------------------- */
+
+.hero {
+  display: grid;
+  gap: var(--gap-tight);
+  justify-items: start;
+}
+
+.money {
+  display: block;
+  font-size: var(--step-display);
+  font-weight: 600;
+  line-height: var(--leading-display);
+  letter-spacing: var(--tracking-display);
+  /* Tightened display type wants a little air above, not below, or the cap
+     height of the digits opens a hole. */
+  margin-bottom: -0.08em;
+}
+
+.money--risk {
+  color: var(--risk);
+}
+
+.money--recovered {
+  color: var(--recovered-edge);
+}
+
+.money--ink {
+  color: var(--ink);
+}
+
+.hero__sub {
+  font-size: var(--step-lead);
+  /* Wide enough to set on two lines without orphaning a word. The first version
+     measured 28ch and broke "subscriptions" onto its own line, which reads as
+     two unrelated claims rather than one sentence. */
+  max-width: 38ch;
+  text-wrap: balance;
+}
+
+.hero__note {
+  color: var(--muted);
+  /* Short enough to hold two lines. "…without you." sat alone on a third at
+     44ch, which is the orphan a ragged measure produces. */
+  max-width: 34ch;
+  /* The safety claim, stated once, in the interface's own voice rather than as
+     a badge. */
+  margin-top: var(--gap-tight);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+    scroll-behavior: auto !important;
+  }
+}

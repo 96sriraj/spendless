@@ -1,0 +1,26 @@
+/* Switzer - self-hosted. Weights 400/500/600, woff2 only.
+ * Source: fontshare.com (free for commercial use).
+ * Downloaded at build time so a demo on conference wifi cannot fall back to a
+ * system face, which would look broken in a way nobody can explain live.
+ */
+@font-face {
+  font-family: 'Switzer';
+  src: url('/fonts/Switzer-1.woff2') format('woff2');
+  font-weight: 400;
+  font-display: swap;
+  font-style: normal;
+}
+@font-face {
+  font-family: 'Switzer';
+  src: url('/fonts/Switzer-2.woff2') format('woff2');
+  font-weight: 500;
+  font-display: swap;
+  font-style: normal;
+}
+@font-face {
+  font-family: 'Switzer';
+  src: url('/fonts/Switzer-3.woff2') format('woff2');
+  font-weight: 600;
+  font-display: swap;
+  font-style: normal;
+}

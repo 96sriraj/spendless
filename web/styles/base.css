@@ -1,0 +1,115 @@
+/**
+ * The base layer: reset, focus, and the handful of element defaults the app
+ * actually leans on.
+ *
+ * Kept separate from `tokens.css` on purpose. Tokens are decisions — colour,
+ * type, motion. This file is plumbing, and keeping them apart means a design
+ * change never has to be read past a hundred lines of `box-sizing`.
+ *
+ * The accessibility work here is not optional garnish. Visible focus, a real
+ * hit-target floor, and a selection colour are the difference between an app
+ * that is usable with a keyboard and one that is merely navigable with a mouse.
+ */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  /*
+   * The one place a page tells the truth about itself before it has painted:
+   * a dark chrome on a light app is a white flash on every load, and this
+   * project will be shown on a projector.
+   */
+  color-scheme: light;
+  background: var(--bg);
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: var(--step-body);
+  line-height: var(--leading-body);
+  font-feature-settings: "kern";
+  /*
+   * Every figure in this app is money. Tabular lining figures keep columns of
+   * them from shifting as digits change, which is the difference between a
+   * number that reads as data and one that reads as decoration.
+   */
+  font-variant-numeric: tabular-nums lining-nums;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+h1,
+h2,
+h3,
+p,
+figure,
+blockquote {
+  margin: 0;
+}
+
+button,
+input {
+  font: inherit;
+  color: inherit;
+}
+
+/*
+ * Focus is visible, always, and it is the ink colour on a mint field rather
+ * than a browser default — the default disappears against a filled button, and
+ * a focus ring you cannot see is not a focus ring.
+ */
+:focus-visible {
+  outline: 3px solid var(--ink);
+  outline-offset: 3px;
+}
+
+:focus:not(:focus-visible) {
+  outline: none;
+}
+
+::selection {
+  background: var(--recovered);
+  color: var(--recovered-ink);
+}
+
+/*
+ * 44px is the smallest target a thumb can hit without aiming. Every interactive
+ * element gets it via min-height, including the ones that are visually smaller.
+ */
+button,
+a[href],
+[role="button"] {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+}
+
+/*
+ * Numbers that must line up across rows get the same treatment as the body —
+ * this exists so a future component cannot opt out of tabular figures by
+ * accident and shift a column when a figure updates.
+ */
+.tnum {
+  font-variant-numeric: tabular-nums lining-nums;
+}
+
+/* Screen-reader-only, for the text a sighted user gets another way. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}

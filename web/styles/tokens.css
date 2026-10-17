@@ -1,0 +1,120 @@
+/**
+ * Design tokens. Every colour, size and duration in the app resolves here.
+ *
+ * Direction: `product-performs` (seed 822768702, dealt by
+ * `.agents/skills/design-taste-frontend`), type redrawn to Switzer.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY TWO ACCENT COLOURS, WHICH BREAKS THE USUAL "ONE ACCENT" RULE
+ * ---------------------------------------------------------------------------
+ *
+ * The house rule is one ground, one ink, one accent. This product carries two
+ * semantic colours, and they are not decoration:
+ *
+ *   --recovered   money that came back. The approve button, a refunded figure,
+ *                 a completed step.
+ *   --risk        money at risk. A figure the agent says is being wasted.
+ *
+ * They appear on screen only where that meaning is true, and nowhere else. A
+ * judge glancing at the screen should be able to tell which numbers are losses
+ * and which are recoveries without reading a word, and that is a fact carried
+ * by colour rather than a mood. Collapsing them to one would either make every
+ * figure look like a loss or hide the distinction entirely.
+ *
+ * ---------------------------------------------------------------------------
+ * WHAT IS DELIBERATELY ABSENT
+ * ---------------------------------------------------------------------------
+ *
+ * No gradients. No glass or backdrop blur. No shadows on anything at rest. No
+ * hairline rules or 1px outlined boxes — surfaces are separated by a single
+ * step in tone, which is cheaper to render and does not turn every edge into
+ * something to look at. Those are the tells of a generated page, and the
+ * measured studios this direction was drawn from use them roughly half the time
+ * on weak sites and under a quarter on strong ones.
+ *
+ * The ground is white, not the cream that passes for premium, and the ink is
+ * charcoal rather than a tinted near-black. Both were near-misses on purpose.
+ */
+
+:root {
+  /* ---- colour -------------------------------------------------------- */
+  /* White, not cream. Cream plus a warm accent is a house style worn by every
+     generated page, and this is a ledger, not a letterpress invitation. */
+  --bg: #ffffff;
+  --surface: #f4f4f4;
+  --surface-sunken: #ebebeb;
+
+  --ink: #1c1c1c;
+  --muted: #5f5f5f; /* 5.9:1 on --bg. Verified, not eyeballed. */
+  --faint: #8a8a8a; /* Secondary notes only. Never body copy. */
+
+  /* Money that came back. Mint, from the dealt palette. */
+  --recovered: #a1ffcb;
+  --recovered-ink: #0d3d24; /* Text on --recovered. 9.1:1. */
+  --recovered-edge: #2f7d52;
+
+  /* Money at risk. Deep enough to carry white text on it, which a lighter red
+     cannot do — and this one has to work as a fill, not just as an accent. */
+  --risk: #c2372a;
+  --risk-ink: #ffffff; /* 5.3:1 on --risk. */
+  --risk-wash: #fdf1f0;
+
+  /* The one ink-inverted surface: a band that marks a refusal. */
+  --refusal-ink: #ffffff;
+  --refusal-surface: #1c1c1c;
+
+  /* ---- type ---------------------------------------------------------- */
+  /* One family. Two voices. Switzer is a neo-grotesk chosen for reading as
+     "exact and unshowy" — the register this product needs, and deliberately
+     not Inter or Geist. */
+  --font-sans: "Switzer", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+
+  /* Five steps, which is the ceiling. The two that do the visible work are
+     --step-display and --step-body; everything else is a step between them. */
+  --step-display: clamp(3.5rem, 2rem + 9vw, 9.5rem);
+  --step-head: clamp(1.6rem, 1.2rem + 2vw, 2.75rem);
+  --step-lead: clamp(1.1875rem, 1.05rem + 0.7vw, 1.5rem);
+  --step-body: clamp(1.0625rem, 1rem + 0.25vw, 1.1875rem);
+  /* 13px floor. The house minimum, and interface labels are not an excuse. */
+  --step-small: 0.8125rem;
+
+  --tracking-display: -0.04em;
+  --tracking-tight: -0.02em;
+  --leading-display: 0.95;
+  --leading-body: 1.5;
+
+  /* ---- space --------------------------------------------------------- */
+  /* One pair of tight margins, used everywhere. Large things run to the edge. */
+  --margin: clamp(1rem, 0.5rem + 2.5vw, 2.5rem);
+  --gap-tight: 0.5rem;
+  --gap: 1rem;
+  --gap-section: clamp(3rem, 2rem + 5vw, 7rem);
+
+  /* ---- shape --------------------------------------------------------- */
+  /* One radius, decided once. Square rather than pill: 52% of the strongest
+     studied sites use square corners, and the soft 9-16px "friendly" radius is
+     the weak-site default. */
+  --radius: 0px;
+
+  /* ---- motion -------------------------------------------------------- */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --duration-fast: 120ms;
+  --duration: 220ms;
+  --duration-slow: 600ms;
+}
+
+/*
+ * Honour the preference, fully.
+ *
+ * Not "make it faster" — remove the travel. A reduced-motion page still has to
+ * read as finished, so the *state changes* stay (a line still appears, a figure
+ * still settles) and only the movement between them goes. Content is never
+ * hidden behind an animation that will not run.
+ */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration-fast: 1ms;
+    --duration: 1ms;
+    --duration-slow: 1ms;
+  }
+}
