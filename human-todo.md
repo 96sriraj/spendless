@@ -63,19 +63,27 @@
 | H1-05e/05f | Account reset + buyer funding — both done |
 | **S-2-live** | **Answered.** Only `transaction_subject` survives; the key moved into `description`. |
 
-### 🔴 What genuinely blocks the agent lane — do these next
+### 🔴 What genuinely blocks the agent lane
 
 | # | Item | Why it blocks |
 |---|---|---|
-| 1 | **H2-01** OpenRouter account + API key | **The AI half of the eligibility requirement.** `AGENTS.md`: two hard requirements, PayPal *and* meaningful AI. The PayPal half is proven; this is the other half, and Phase 5 cannot be built or honestly claimed without it. |
-| 2 | **H1-07** One-line demo persona | Decides what the README says. 2 minutes of thought. |
-| 3 | **Re-run `bun run seed`** | The two existing captures predate the marker fix, so they read as unidentified. New seeds carry `spendless:` in the description. Also gives you a third merchant. |
+| 1 | **H1-07** One-line demo persona | Decides what the README says. 2 minutes of thought. |
+| 2 | **H2-02** Pick the OpenRouter model | 1-minute shortlist. `AGENTS.md`: a small model with a tight schema beats a large one wandering — so this is a real choice, not a default. |
 
-### 🟡 Needed later, not yet blocking
+**H2-01 is done.** Put the key in `.env` as `OPENROUTER_API_KEY`. See `.env.example`, which was written
+today because there was no committed list of what a fresh shell needs — `.gitignore` protected `.env`
+perfectly well, which is exactly the kind of protection that is useless if you don't know the name to
+use.
 
-- **H3-01..04** Cloudflare account + D1 — blocks *deployment*, not building.
+### 🟢 Nice to have, not blocking
+
+- **Re-run `bun run seed`** — the two existing captures predate the marker fix, so they read as
+  unidentified. New seeds carry `spendless:` and give you a third merchant. Do it whenever; nothing
+  waits on it.
+- **H3-01..04** Cloudflare account + D1 — blocks *deployment*, not building. Worth doing early anyway
+  since account creation sometimes needs email verification.
 - **H1-06** dispute — contingent, and `AGENTS.md` says cut it rather than fake it.
-- **H4** repo hygiene, **H5** rehearsal, **H6** video, **H7** Devpost.
+- **H5** rehearsal · **H6** video · **H7** Devpost — the endgame.
 
 ---
 
@@ -89,11 +97,11 @@
 - [x] **H1-01** `[developer.paypal.com] Create a PayPal **Business** developer account` → **DONE Oct 16.** Business developer account exists.
 - [x] **H1-02** `[Developer Dashboard → Apps & Credentials → Sandbox]` Create the sandbox app → **DONE Oct 16.** Client ID and secret held.
   - In a password manager, **not** in this repo. No secrets in a committed file (`AGENTS.md`).
-- [ ] **H1-03** `[My Apps → Transaction Search]` **Enable the Transaction Search permission toggle** on the sandbox app → expect the toggle visibly on
+- [x] **H1-03** `[My Apps → Transaction Search]` **Enable the Transaction Search permission toggle** on the sandbox app → expect the toggle visibly on
   - **Do this next.** It is the single permission the whole read path depends on, and it is easy to
     miss. Without it every read returns a permission error, which reads exactly like "sandbox is
     broken" and costs an afternoon.
-- [ ] **H1-04** **Put the two sandbox credentials in your shell, then run `bun run spike`**
+- [x] **H1-04** **Put the two sandbox credentials in your shell, then run `bun run spike`**
   - **You do not need to mint or manage a token.** `spike.ts` does that itself. Set two variables
     and run one command:
 
@@ -119,14 +127,14 @@
   - The `expires_in` in the OAuth response answers **S-0-05** immediately (9 hours, against the 3–8h
     the docs claim). Measuring it for real takes hours and is opt-in via `SPIKE_MEASURE_TTL=1`.
   - Once a read works, the agent can enable `paypal-local` (`todo.md` S0-01).
-- [ ] **H1-05** `[sandbox]` **You need the sandbox BUYER account** → expect you can log into it at
+- [x] **H1-05** `[sandbox]` **You need the sandbox BUYER account** → expect you can log into it at
   `https://www.sandbox.paypal.com` and see its balance
   - Dashboard → **Testing Tools → Sandbox Accounts**. Note the **business** account's email/password and
     the **personal/buyer** account's email/password separately. They are two different logins.
   - **This is now the only thing blocking the demo.** The sandbox has **zero payments** — one $5,000
     account adjustment (T1900) and nothing else. There is no data to classify until you approve a real
     payment.
-- [ ] **H1-05b** `[browser]` `bun run seed` → approve the three orders **as the buyer** → then
+- [x] **H1-05b** `[browser]` `bun run seed` → approve the three orders **as the buyer** → then
   `bun run spike`
   - ⚠️ **A browser is required and cannot be avoided.** Tried and abandoned on 2026-10-16: funding an
     order over the API via `confirm-payment-source` with a sandbox test card returns
@@ -149,7 +157,7 @@
   - Fixed by charging in the payee's currency. `bun run seed` now uses INR by default; override with
     `SEED_CURRENCY=USD` if the merchant account is ever USD-based.
 
-- [ ] **H1-05d** `[fallback, only if approval still fails]` `bun run seed --method transfer` → click the printed
+- [x] ~~H1-05d~~ **OBSOLETE** `[fallback, only if approval still fails]` `bun run seed --method transfer` → click the printed
   Send-money link → expect a real payment in the account
   - One click, no checkout flow, no cookies, no country problem. **It carries no `invoice_id`**, so it
     proves the read path sees real payments but proves nothing about identity — do not mistake it for
@@ -196,7 +204,7 @@
 
 ## H2 — OpenRouter key — Day 1 · 🔴 BLOCKS PHASE 5
 
-- [ ] **H2-01** `[openrouter.ai] Create an account and generate an API key** → expect a key that works at free-tier demo volume
+- [x] **H2-01** `[openrouter.ai] Create an account and generate an API key** → expect a key that works at free-tier demo volume
   - Agent reads it server-side only (P8-02). **It never reaches the browser.**
 - [ ] **H2-02** `[openrouter.ai] Pick a cheap instruct model** → expect a shortlist of 1–2 candidates for P5-02
   - A small model with a tight schema beats a large one wandering. Free tier is enough at demo volume.
@@ -214,10 +222,10 @@
 
 ## H4 — Repo and licence — Day 2
 
-- [ ] **H4-01** `[github.com/96sriraj/spendless] Confirm the repo is **public**` → expect Devpost's public-repo requirement met
-- [ ] **H4-02** `[repo]` Confirm `LICENSE` (MIT) is committed → expect a licence file Devpost can see
+- [x] **H4-01** `[github.com/96sriraj/spendless] Confirm the repo is **public**` → expect Devpost's public-repo requirement met
+- [x] **H4-02** `[repo]` Confirm `LICENSE` (MIT) is committed → expect a licence file Devpost can see
   - This was an automatic submission blocker for the rejected Nixt entry. Do not lose it again.
-- [ ] **H4-03** `[repo]` Commit the untracked docs and config: `AGENTS.md`, `ARCHITECTURE.md`, `opencode.jsonc`, `skills-lock.json`, `.agents/` → expect a clean `git status`
+- [x] **H4-03** `[repo]` Commit the untracked docs and config: `AGENTS.md`, `ARCHITECTURE.md`, `opencode.jsonc`, `skills-lock.json`, `.agents/` → expect a clean `git status`
   - The agent lane starts from `todo.md` Phase 0; commit the instructions it depends on first.
 
 ## H5 — Demo rehearsal — Oct 27–Nov 2
