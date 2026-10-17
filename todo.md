@@ -340,24 +340,30 @@ allow-list is at `D:\Github\nixt\worker\src\index.ts:42-57` (**not yet ported �
 
 ---
 
-## Phase 6 — Action layer + approval UI (Oct 19–20) · **kill-switch date** · **NOT STARTED**
+## Phase 6 — Action layer + approval UI (Oct 19–20) · **kill-switch date** · **action layer DONE, UI NOT STARTED**
 
-> **The executor exists; the layer around it does not.** `McpPayPalExecutor` issued a real refund on
-> Oct 17, proven live. There is still no `src/actions/`, no proposal → approval → execution chain, and
-> no approval UI. Every bullet below is a spec, not a description of code.
+> **The executor could already issue a real refund. Nothing decided *whether* to.** That is what this
+> phase adds, and the interesting part is where the enforcement lives: **in the store, not the UI.**
+> P6-08's reason is the obvious one — UI-level enforcement is not enforcement. A disabled button is a
+> request; a `POST /execute` is not.
 >
-> **The kill switch is settled — money-out works.** What Phase 6 adds is what makes it safe and what
-> a judge is actually watching: a human approves before money moves, and the refusal path is real
-> rather than decorative.
+> **What is built:** `src/actions/` — `guardrails` · `killSwitch` · `disputeWindow` · `actionLayer` —
+> plus `src/db/actions.ts`, the repository that *is* the state machine. Transitions are conditional
+> updates (`WHERE id = ? AND status = 'approved'`), so `changes === 0` is the refusal and the
+> database produced it.
+>
+> **What is not built:** P6-02 and P6-04. There is no UI in this repository at all, which makes
+> approval a real HTTP endpoint and the SANDBOX indicator a real requirement rather than a styling
+> note. That is the next chunk.
 
-- [ ] **P6-01** `[src/actions/]` `proposal → approval → execution → result`, **all four persisted** → expect a complete audit trail per action; nothing throwaway
-- [ ] **P6-02** `[ui]` Approval UI: a proposal cannot execute without explicit human approval → expect refunds are never autonomous
-- [ ] **P6-03** `[src/actions/guardrails.ts]` Hard configurable cap on refund amounts → expect a config-driven ceiling enforced server-side
-- [ ] **P6-04** `[ui]` Prominent `SANDBOX` indicator, always visible → expect it on every screen that shows money or an action
-- [ ] **P6-05** `[src/actions/killswitch.ts]` Kill switch that halts **execution** without halting the demo → expect the UI still renders with execution disabled
-- [ ] **P6-06** `[src/actions/disputes.ts]` Encode the dispute windows: escalation requires **≥7 days** since payment; disputes auto-close at **20 days** → expect the agent can only act inside the window, and the UI shows the deadline
-- [ ] **P6-07** `[test/unit]` Guardrail tests: over-cap rejected, unapproved not executed, kill switch stops execution but not rendering → expect all green
-- [ ] **P6-08** `[test/integration]` The full `proposal → approval → execution → result` lifecycle writes **four persisted states** and cannot skip one → expect an attempt to execute without an approval to be refused by the store, not by the UI
+- [x] **P6-01** `[src/actions/]` `proposal -> approval -> execution -> result`, **all four persisted** -> **DONE.** `src/actions/actionLayer.ts` + `src/db/actions.ts`. The amount enters the pipeline exactly once, read from the core's `savingCents`; the agent's proposal carries no amount at all.
+- [ ] **P6-02** `[ui]` Approval UI: a proposal cannot execute without explicit human approval -> **NOT STARTED, and now the whole of what is left in Phase 6.** The store already refuses an unapproved action, so this is the screen that makes it a *decision* rather than an error message. There is no UI in this repository yet.
+- [x] **P6-03** `[src/actions/guardrails.ts]` Hard configurable cap on refund amounts -> **DONE.** Config-driven, and it **refuses rather than clamps** - a clamped refund would show one number on the approval screen and issue another. A zero cap is honoured as zero rather than read as "unset", and a cap in one currency is never compared against an amount in another.
+- [ ] **P6-04** `[ui]` Prominent `SANDBOX` indicator, always visible -> **NOT STARTED** (no UI yet). Note the floor is already enforced below it: `connectPayPalMcp` hard-refuses anything but `SANDBOX`, so the indicator is stating a fact rather than promising one.
+- [x] **P6-05** `[src/actions/killSwitch.ts]` Kill switch that halts **execution** without halting the demo -> **DONE.** The read paths (`canRead`, `canRenderRunLog`, `canPropose`) answer true unconditionally, and the test asserts that *inversely* on purpose - if anyone ever makes them consult the switch, the assertion is what fails. It resolves rather than throwing, because a throw becomes a 500 during the recording.
+- [x] **P6-06** `[src/actions/disputeWindow.ts]` Encode the dispute windows: escalation requires **>=7 days** since payment; disputes auto-close at **20 days** -> **DONE.** Pure, injected clock, and tested on the *boundaries* rather than the middle: day 7 escalates, day 6 does not, day 20 is closed. A payment dated in the future is refused, because a negative age satisfies "at least 7 days ago" - the one error direction that loses a dispute.
+- [x] **P6-07** `[test/unit]` Guardrail tests: over-cap rejected, unapproved not executed, kill switch stops execution but not rendering -> **DONE.** All three mutation-verified: neutering the cap check, the kill switch, or the store precondition each turns the suite red.
+- [x] **P6-08** `[test/integration]` The full lifecycle writes **four persisted states** and cannot skip one -> **DONE, and this is the load-bearing claim of the phase.** Transitions are conditional updates (`WHERE id = ? AND status = 'approved'`), so `changes === 0` is the refusal and the database produced it. Removing that precondition fails **10 of 11** lifecycle tests.
   - UI-level enforcement is not enforcement. A direct HTTP POST to the execute endpoint must fail too.
 
 ---

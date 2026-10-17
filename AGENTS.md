@@ -2,21 +2,18 @@
 
 **The AI agent that spends less, not more.** PayPal AI Hackathon entry (Devpost: [Build What's Next with PayPal and AI](https://paypalaihackathon.devpost.com)).
 
-> **Snapshot 2026-10-17.** Phases 1–2 are **done and green** (`bun run verify` = typecheck +
-> 573 tests). The PayPal sandbox account, app and credentials are **live**. Money has moved **both
-> ways**: two orders captured, and a real refund issued end to end through the product path. Both
-> credentials pass `bun run check-env`.
+> **Snapshot 2026-10-17.** `bun run verify` = typecheck + **628 tests**, all green. Phases 1–2, 5 and
+> the action half of 6 are **done**. The PayPal sandbox account, app and credentials are **live**. Money
+> has moved **both ways**: two orders captured, and a real refund issued end to end through the product
+> path. Both credentials pass `bun run check-env`.
 > Read `README.md` (scope + business case) and `ARCHITECTURE.md` (how it gets built, in what
 > order) before writing code. Both are the source of truth — this file only records what an agent
 > would otherwise get wrong.
 >
-> **Phase 5 (the agent) is DONE.** `src/agent/` runs a bounded loop over a three-tool allowlist
-> with no execution capability, and it has produced valid proposals against the live model.
->
-> **What is NOT built yet:** the action layer's `proposal → approval → execution` chain and its
-> approval UI (Phase 6), and any UI or deployment (Phases 4, 8). `McpPayPalExecutor` can issue a
-> refund and does, but **nothing above it decides whether to** — there is no approval step and no
-> guardrail. Do not describe the demo as having a safety model until Phase 6 exists.
+> **What is NOT built:** **any UI at all** — no React, no `wrangler.toml`, no deployment (P6-02, P6-04,
+> P4-03, Phase 7–8). The action layer, the agent, the adapters and the core all exist and are tested;
+> the demo cannot be recorded because there is nothing on screen to record. **That is the whole of what
+> is left**, and it is a different kind of work from everything so far.
 >
 > **Work the queues:** [`todo.md`](./todo.md) is the agent lane, [`human-todo.md`](./human-todo.md)
 > is the founder lane. The agent lane blocks on anything marked 🔴 there (PayPal business account,
@@ -138,14 +135,35 @@ Also carried over: raw SQL + zod (no ORM, deliberate), and the reusable CORS all
 
 Every action is `proposal → approval → execution → result`, all four persisted. Refunds move money; an unreviewed autonomous refund is both a safety problem and a weak Design/Impact story.
 
-> **None of this exists yet** (Oct 17). There is no `src/actions/`, no approval UI, and no
-> `ActionExecutor` implementation. Treat every bullet below as a spec for Phase 6, not a description
-> of the code.
+> **Built, 2026-10-17, minus the UI.** `src/actions/` — `guardrails` · `killSwitch` · `disputeWindow`
+> · `actionLayer` — plus `src/db/actions.ts`. **The UI (P6-02, P6-04) is the whole of what is left**
+> in this phase, and there is no UI in this repository yet.
 
+- **The enforcement lives in the store, not the UI.** P6-08's reason is the obvious one: a disabled
+  button is a request, and a `POST /execute` is not. Transitions are conditional updates —
+  `UPDATE … WHERE id = ? AND status = 'approved'` — so `changes === 0` *is* the refusal, produced by
+  the database. A read-then-write would pass every other test and still refund twice under two
+  concurrent requests; there is a test that fires two claims at once and asserts exactly one wins.
+- **An `executing` state exists so a crash is visible rather than a lie.** Without it a row must be
+  claimed as `executed` *before* the provider is called, and a failure leaves a proposal claiming
+  success with no result row — the audit trail's one unforgivable falsehood.
+- **The chain runs `guardrails → kill switch → store → executor`**, and each step can stop it. The
+  order is load-bearing: the cap is checked first because an over-cap refund is wrong regardless of
+  whether execution is enabled; the switch before the store so a halted deployment does not
+  accumulate approvals it can never act on.
+- **Every refusal is an outcome, not an exception.** The kill switch *resolves* — a throw becomes a
+  500 during the recording, and the one artefact the judges watch would be a stack trace.
+- **The cap refuses; it never clamps.** A clamped refund shows one number on the approval screen and
+  issues another. A zero cap is honoured as zero rather than read as "unset".
 - Hard configurable cap on refund amounts.
-- Prominent `SANDBOX` indicator in the UI, always.
-- Kill switch that halts execution without halting the demo.
-- Dispute windows encoded: escalation requires **≥7 days** since payment, disputes auto-close at **20 days**.
+- Prominent `SANDBOX` indicator in the UI, always. (The floor is already enforced below it:
+  `connectPayPalMcp` hard-refuses anything but `SANDBOX`, so the indicator states a fact.)
+- Kill switch that halts execution without halting the demo. Its read paths answer true
+  unconditionally, and the test asserts that **inversely** — if anyone makes them consult the switch,
+  that assertion is what fails.
+- Dispute windows encoded: escalation requires **≥7 days** since payment, disputes auto-close at
+  **20 days**. Boundaries tested rather than middles: day 7 escalates, day 6 does not, day 20 is
+  closed, and a payment dated in the future is refused because a negative age satisfies "≥7 days".
 - Agent proposes long before it can move money (build order 7 → 8 → 9). Keep it that way — the demo degrades gracefully.
 
 ## Test-driven development
