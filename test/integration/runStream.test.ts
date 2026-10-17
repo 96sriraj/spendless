@@ -5,6 +5,7 @@ import BetterSqlite3 from "better-sqlite3";
 import { createSqliteD1 } from "../support/sqliteD1";
 import { createDatabase, type Database } from "@/db";
 import { readRunSteps } from "@/db/runLog";
+import { insertProposal } from "@/db/actions";
 import type { Completion } from "@/agent/tools";
 import type { RunEvent } from "@/services/runStream";
 import { streamAgentRun } from "@/services/runStream";
@@ -89,6 +90,103 @@ async function collect(events: AsyncGenerator<RunEvent>): Promise<RunEvent[]> {
   for await (const event of events) out.push(event);
   return out;
 }
+
+/**
+ * A failure while writing the proposals must still end the stream.
+ *
+ * This test exists because of a hang. `insertProposal` can reject — a duplicate
+ * primary key is enough, and two runs on a fixed clock both minted
+ * `act-<ms>-1` — and the rejection escaped the completion handler, so `close()`
+ * was never called and the generator waited on a promise nobody would ever
+ * resolve. The screen sat on "Running…" forever.
+ *
+ * A stream that cannot report its own failure is the worst shape a stream can
+ * have, because the failure mode and the success mode look identical from the
+ * client: silence.
+ */
+describe("streamAgentRun closes even when recording proposals fails", () => {
+  it("ends with an error rather than waiting forever", async () => {
+    const { findings } = await buildReadModel(db, NOW);
+
+    // Force the failure deterministically. Proposal ids are `act-<runId>-<n>`
+    // with the counter starting at 1, so the first proposal of a run has a
+    // predictable id — pre-insert it and `insertProposal` will collide on the
+    // primary key and reject.
+    //
+    // The first version of this test re-ran the same run twice and expected a
+    // collision, which stopped happening the moment ids became unique. It passed
+    // for the wrong reason: nothing failed, so `close()` was reached normally and
+    // the test proved nothing about the failure path at all.
+    await insertProposal(
+      db,
+      {
+        id: "act-run-collide-1",
+        runId: null,
+        kind: "refund",
+        targetId: "sub-netflix",
+        amountCents: 1_599,
+        currency: "USD",
+        rationale: "already here",
+        evidence: null,
+      },
+      () => NOW.toISOString(),
+    );
+
+    const events = await collect(
+      streamAgentRun({
+        db,
+        runId: "run-collide",
+        findings,
+        complete: complete(["list_findings", "record_proposal"]),
+        now: NOW,
+      }),
+    );
+
+    const last = events[events.length - 1];
+    expect(last?.type).toBe("error");
+    if (last?.type !== "error") return;
+    // The reason says what actually went wrong, so the screen can show it rather
+    // than going quiet.
+    expect(last.message).toMatch(/could not be recorded/i);
+  }, 15_000);
+
+  it("gives two runs different proposal ids, because a clock is not a unique key", async () => {
+    // `now` is injected for determinism, so two runs share it exactly. An id built
+    // from the clock alone therefore collides, and the second run's insert dies on
+    // the primary key — which is a bug that only appears in tests with a fixed
+    // clock and never in a demo, where the clock moves. Exactly the kind of thing
+    // that is cheapest to find here.
+    const { findings } = await buildReadModel(db, NOW);
+    const a = await collect(
+      streamAgentRun({
+        db,
+        runId: "run-1",
+        findings,
+        complete: complete(["list_findings", "record_proposal"]),
+        now: NOW,
+      }),
+    );
+    const b = await collect(
+      streamAgentRun({
+        db,
+        runId: "run-2",
+        findings,
+        complete: complete(["list_findings", "record_proposal"]),
+        now: NOW,
+      }),
+    );
+
+    const idsOf = (events: RunEvent[]) =>
+      events.flatMap((e) => (e.type === "done" ? e.proposals.map((p) => p.id) : []));
+    const idsA = idsOf(a);
+    const idsB = idsOf(b);
+
+    expect(idsA.length).toBeGreaterThan(0);
+    expect(idsB.length).toBeGreaterThan(0);
+    // A shared id would make the second run's proposal overwrite the first.
+    expect(new Set([...idsA, ...idsB]).size).toBe(idsA.length + idsB.length);
+  }, 15_000);
+});
 
 describe("streamAgentRun", () => {
   it("puts the terminal event last, always", async () => {

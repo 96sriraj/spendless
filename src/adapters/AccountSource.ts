@@ -162,7 +162,19 @@ export type AccountCapabilities = {
   readonly resolveDispute: boolean;
 };
 
-export type AdapterKind = "mcp" | "rest" | "csv";
+/**
+ * Which binding produced this.
+ *
+ * `unavailable` is the fourth answer, and it is the one the UI most needs: there
+ * is no binding at all. A Worker cannot spawn the MCP stdio server, so a run
+ * executed there has no executor, and the screen has to be able to say "nothing
+ * was sent" rather than render a button that looks like it moved money.
+ *
+ * It is a variant here rather than a separate field because nothing in the repo
+ * switches exhaustively on this type, and "which binding is this" genuinely has
+ * "none" as an answer.
+ */
+export type AdapterKind = "mcp" | "rest" | "csv" | "unavailable";
 
 export interface AccountSource {
   /** Which binding this is. Drives the SANDBOX indicator and the run log. */
@@ -245,6 +257,17 @@ export type RefundResult = {
   readonly amountCents: number | null;
   readonly currency: Currency;
   readonly raw: unknown;
+  /**
+   * Why it failed, when the binding knows.
+   *
+   * Optional because PayPal's own responses do not always carry one, and a
+   * required field would mean inventing a string. It exists because
+   * `callExecutor` used to hardcode `"refund failed"`, which threw away the one
+   * thing an operator needs: an executor that declines *because nothing is wired*
+   * has to be able to say so. Without this the run log reads "refund failed"
+   * beside a button that looks like it moved money.
+   */
+  readonly message?: string;
 };
 
 export type ActionResult = {

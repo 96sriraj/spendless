@@ -311,3 +311,84 @@
     transition: none;
   }
 }
+
+/* ---- the approval ---------------------------------------------------- */
+
+/*
+ * The demo's last click, so it gets the least decoration of anything on the
+ * screen. A row, a figure, and one button carrying the total — the amount is on
+ * the button rather than beside it, so what is being authorised is visible at the
+ * moment of the click and not one line away from it.
+ */
+.approve {
+  display: grid;
+  gap: var(--gap-tight);
+  border-top: 1px solid var(--surface-sunken);
+  padding-top: var(--gap);
+}
+
+.approve__row {
+  display: grid;
+  /* Merchant and figure share a line; the rationale sits under both, because a
+     reason set in a narrow column is unreadable. */
+  grid-template-columns: 1fr auto;
+  gap: 2px var(--gap);
+  margin: 0;
+  align-items: baseline;
+}
+
+.approve__merchant {
+  display: flex;
+  align-items: baseline;
+  gap: var(--gap-tight);
+  font-weight: 600;
+  flex-wrap: wrap;
+}
+
+/* The raw key, in mono, beside the readable label. No PayPal API returns a
+   merchant name to anyone, so the key IS the identity — showing only the label
+   would be one skipped character away from claiming a brand the data does not
+   support. */
+.approve__key {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.75rem;
+  font-weight: 400;
+  color: var(--faint);
+}
+
+.approve__amount {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.approve__why {
+  grid-column: 1 / -1;
+  font-size: var(--step-small);
+  color: var(--muted);
+}
+
+.approve__note {
+  margin: 0;
+  font-size: var(--step-small);
+  color: var(--muted);
+}
+
+.approve__outcomes {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 2px;
+  font-size: var(--step-small);
+}
+
+.approve__outcomes li[data-ok='false'] {
+  color: var(--risk);
+}
+
+.approve__outcomes li[data-ok='true'] {
+  /* The only place `--recovered` appears, and it appears only for an action that
+     actually executed. That is the whole reason it is a semantic colour rather
+     than a decoration. */
+  color: var(--recovered-edge);
+}

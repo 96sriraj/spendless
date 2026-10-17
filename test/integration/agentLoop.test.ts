@@ -209,21 +209,63 @@ const liveCredentials =
   process.env["OPENROUTER_API_KEY"]?.trim() !== "";
 
 describe("the chosen small model, live", () => {
-  it.runIf(liveCredentials)("returns proposals that validate against the schema", async () => {
+  /**
+   * A provider outage skips; only a schema violation fails.
+   *
+   * This test skips without credentials for the right reason — a missing key must
+   * never turn CI red. But a *present* key that returns HTTP 504 was still
+   * failing the build, which is the same mistake wearing a different hat: a
+   * transient OpenRouter timeout has nothing to do with whether the chosen model
+   * emits schema-valid output, and turning it red means the suite is
+   * untestable whenever the provider has a bad minute.
+   *
+   * The distinction that matters: a schema violation is a real regression and
+   * still fails. Only the provider's own failure to answer is forgiven.
+   */
+  it.runIf(liveCredentials)("returns proposals that validate against the schema", async (ctx) => {
     // P5-02's actual claim. Everything above proves the loop *would* accept a
     // well-formed proposal; this is the only test that says the model produces
-    // one. A 1B model with a tight schema is the bet AGENTS.md makes — this is
+    // one. A 1B model with a tight schema is the bet AGENTS.md makes - this is
     // where the bet is cashed out or lost.
     const client = createOpenRouterClient({
       apiKey: process.env["OPENROUTER_API_KEY"] ?? "",
       model: MODEL,
     });
 
-    const run = await runAgent({
-      findings: FINDINGS,
-      complete: (request) => client.complete(request as CompleteRequest),
-      maxTurns: 6,
-    });
+    /**
+     * The provider's own failure is not this test's verdict.
+     *
+     * A 504 or a 429 says OpenRouter was having a bad minute; it says nothing
+     * about whether the chosen model emits schema-valid output. Failing here
+     * would mean `bun run verify` is untestable whenever the provider hiccups,
+     * which is a worse outcome than the assertion not running.
+     *
+     * Anything else — a malformed completion, a proposal that fails the schema —
+     * is a real regression and still fails, which is the whole point of keeping
+     * this assertion.
+     */
+    const isProviderOutage = (error: unknown): boolean => {
+      const status = (error as { status?: number }).status;
+      return typeof status === "number" && (status >= 500 || status === 429 || status === 408);
+    };
+
+    let run;
+    try {
+      run = await runAgent({
+        findings: FINDINGS,
+        complete: (request) => client.complete(request as CompleteRequest),
+        maxTurns: 6,
+      });
+    } catch (error: unknown) {
+      if (isProviderOutage(error)) {
+        console.log(
+          `      skipped: OpenRouter returned HTTP ${(error as { status: number }).status}, ` +
+            `which says nothing about whether ${MODEL} emits schema-valid output`,
+        );
+        ctx.skip();
+      }
+      throw error;
+    }
 
     // Always logged, whatever the verdict. "What does the small model actually
     // do" is the question this test exists to answer, and a log line that only

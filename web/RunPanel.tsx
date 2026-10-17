@@ -30,12 +30,16 @@
 import { useCallback, useRef, useState } from "react";
 import {
   applyRunEvent,
+  approveSummary,
   describeStep,
   emptyRunState,
+  merchantLabel,
   parseRunEvent,
   statusLine,
+  type RunProposal,
   type RunState,
 } from "./runlog";
+import { formatMinor } from "./format";
 
 /** A `\n\n`-delimited chunk can split a UTF-8 sequence, so decode per frame. */
 const decoder = new TextDecoder();
@@ -45,6 +49,19 @@ export function RunPanel() {
   const abort = useRef<AbortController | null>(null);
 
   const running = state.phase === "running";
+
+  /**
+   * Re-read the read model after an approval.
+   *
+   * Not a poll: the figure changes when the merchant acts, and an action is
+   * something they press. A poll here would show a stale hero number immediately
+   * after a refund, which reads as a bug rather than as a race.
+   */
+  const refresh = useCallback(() => {
+    void fetch("/api/state")
+      .then((r) => r.json() as Promise<unknown>)
+      .catch(() => undefined);
+  }, []);
 
   const start = useCallback(async () => {
     if (abort.current !== null) return;
@@ -133,6 +150,121 @@ export function RunPanel() {
       {state.error !== null && <p className="log__error">{state.error}</p>}
 
       {state.finalText.length > 0 && <p className="log__final">{state.finalText}</p>}
+
+      {state.proposals.length > 0 && (
+        <Approve proposals={state.proposals} onDone={refresh} />
+      )}
     </section>
+  );
+}
+
+/**
+ * The last click.
+ *
+ * ---------------------------------------------------------------------------
+ * ONE BUTTON, NOT ONE PER PROPOSAL
+ * ---------------------------------------------------------------------------
+ *
+ * The brief is "make the payment quickly", and a merchant who has read a plan is
+ * approving that plan, not each line of it. The figure is on the button, so the
+ * amount is visible *before* the click rather than after — which is the one place
+ * a single-click design can still be honest about what it is about to do.
+ *
+ * The enforcement underneath is unchanged. `claimForExecution` is a conditional
+ * update, so a second click loses the race and nothing is sent twice. Speed at
+ * the surface, compare-and-set underneath.
+ *
+ * ---------------------------------------------------------------------------
+ * WHAT IT SHOWS WHEN THERE IS NO EXECUTOR
+ * ---------------------------------------------------------------------------
+ *
+ * A Worker cannot spawn the MCP stdio server, so there is no PayPal executor here
+ * and the request comes back a refusal. This renders that refusal as a sentence.
+ * It does not optimistically show money recovered, and it does not hide the
+ * failure — an "Approve" button that leaves the screen claiming nothing happened
+ * is the exact shape of a product that lies about money.
+ */
+function Approve({
+  proposals,
+  onDone,
+}: {
+  readonly proposals: readonly RunProposal[];
+  readonly onDone: () => void;
+}) {
+  const summary = approveSummary(proposals);
+  const [busy, setBusy] = useState(false);
+  const [outcomes, setOutcomes] = useState<{ ok: boolean; message: string }[] | null>(null);
+
+  const approve = useCallback(async () => {
+    const ids = proposals.filter((p) => p.status === "proposed").map((p) => p.id);
+    if (ids.length === 0) return;
+    setBusy(true);
+    try {
+      const response = await fetch("/api/actions/approve", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ proposalIds: ids }),
+      });
+      const body = (await response.json()) as {
+        outcomes?: { ok: boolean; message: string }[];
+        error?: string;
+      };
+      setOutcomes(body.outcomes ?? [{ ok: false, message: body.error ?? "the request failed" }]);
+      onDone();
+    } catch (error: unknown) {
+      setOutcomes([
+        { ok: false, message: error instanceof Error ? error.message : String(error) },
+      ]);
+    } finally {
+      setBusy(false);
+    }
+  }, [proposals, onDone]);
+
+  return (
+    <div className="approve">
+      {proposals.map((proposal) => (
+        <p className="approve__row" key={proposal.id}>
+          <span className="approve__merchant">
+            {merchantLabel(proposal.subId)}
+            {/* The raw key, always. The label above is derived from it; this is
+                what the data actually says, and no PayPal API returns a merchant
+                name to anyone. */}
+            <code className="approve__key">{proposal.subId}</code>
+          </span>
+          <span className="approve__amount">
+            {proposal.amountCents === null
+              ? "no money moves"
+              : formatMinor(proposal.amountCents, proposal.currency)}
+          </span>
+          <span className="approve__why">{proposal.rationale}</span>
+        </p>
+      ))}
+
+      {summary.available && outcomes === null && (
+        <button className="action" type="button" onClick={() => void approve()} disabled={busy}>
+          {busy
+            ? "Approving…"
+            : `Approve and refund ${formatMinor(summary.cents, summary.currency)}`}
+        </button>
+      )}
+
+      {!summary.available && summary.count === 0 && proposals.length > 0 && (
+        // Nothing refundable. A "$0.00" button would look broken, and a
+        // cancellation genuinely does not move money.
+        <p className="approve__note">
+          Nothing here moves money — these are cancellations and questions, not refunds.
+        </p>
+      )}
+
+      {outcomes !== null && (
+        <ul className="approve__outcomes">
+          {outcomes.map((outcome, i) => (
+            <li key={i} data-ok={outcome.ok ? "true" : "false"}>
+              {outcome.message}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }

@@ -31,7 +31,9 @@
 import { createDatabase } from "../src/db";
 import { createOpenRouterClient } from "../src/agent/tools";
 import type { ChatMessage, ToolSpec } from "../src/agent/tools";
+import { createKillSwitch } from "../src/actions/killSwitch";
 import { buildReadModel } from "../src/services/readModel";
+import { approveAndExecute, unavailableExecutor } from "../src/services/actions";
 import { newRunId, streamAgentRun } from "../src/services/runStream";
 import { seedScenario } from "../src/services/scenario";
 import { ensureSchema } from "./schema";
@@ -210,7 +212,107 @@ const routes: Record<string, Route> = {
       },
     });
   },
+
+  /**
+   * The last click: approve and run.
+   *
+   * One call rather than approve-then-execute, because the brief is "make the
+   * payment quickly" and a merchant approving a plan is not approving each line
+   * of it. The *enforcement* is unchanged — `claimForExecution` is still a
+   * conditional update, so a second click loses the race and nothing is sent
+   * twice. Speed at the surface, compare-and-set underneath.
+   *
+   * The response always carries a sentence per proposal. A 200 with a bare `ok`
+   * beside a refund button is a lie waiting to be recorded, and a refusal has to
+   * be renderable text rather than an exception — the artefact the judges watch
+   * must never be a stack trace.
+   *
+   * **There is no PayPal executor here.** A Worker cannot spawn the MCP stdio
+   * server, so this path runs guardrails → kill switch → store and then declines,
+   * saying so. The enforcement chain above it is real and is what is worth
+   * showing; the money honestly is not wired in this environment, and the screen
+   * is told so rather than left to imply otherwise.
+   */
+  "POST /api/actions/approve": async (request, env) => {
+    if (env.DB === undefined) return json({ error: "no database configured" }, 503);
+
+    const parsed = await readProposalIds(request);
+    if (parsed === null) {
+      return json({ error: "expected { proposalIds: string[] } with at least one id" }, 400);
+    }
+
+    const db = createDatabase(env.DB);
+    await ensureSchema(env.DB);
+    const now = new Date();
+    const { findings } = await buildReadModel(db, now);
+
+    const outcomes: { proposalId: string; ok: boolean; message: string }[] = [];
+    for (const proposalId of parsed) {
+      const outcome = await approveAndExecute({
+        db,
+        proposalId,
+        findings,
+        executor: unavailableExecutor(),
+        // Absent means live. Failing closed here would silently stop the demo on a
+        // machine that simply has no environment variable set.
+        killSwitch: createKillSwitch(
+          env.EXECUTION_ENABLED === undefined ? {} : { executionEnabled: env.EXECUTION_ENABLED !== "false" },
+        ),
+        refundCapCents: readCap(env.REFUND_CAP_CENTS),
+        approvedBy: "merchant",
+        now,
+      });
+
+      outcomes.push({
+        proposalId,
+        ok: outcome.ok,
+        message: outcome.ok ? outcome.message : outcome.reason,
+      });
+    }
+
+    return json({ outcomes });
+  },
 };
+
+/**
+ * Read the approval request, or null when it is not one.
+ *
+ * Returns null rather than throwing: a malformed body is a client error the route
+ * reports in its own shape, not an exception that becomes a 500.
+ */
+async function readProposalIds(request: Request): Promise<string[] | null> {
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return null;
+  }
+  if (typeof body !== "object" || body === null) return null;
+
+  const ids = (body as { proposalIds?: unknown }).proposalIds;
+  if (!Array.isArray(ids)) return null;
+  const strings = ids.filter((id): id is string => typeof id === "string" && id.length > 0);
+  return strings.length === ids.length && strings.length > 0 ? strings : null;
+}
+
+/**
+ * Default cap when nothing is configured: $100.
+ *
+ * An unset cap defaulting to **zero** is fail-safe and useless — on a machine with
+ * no environment file every refund is refused with "exceeds 0.00", which reads as
+ * a broken guardrail rather than a configured one, and makes the demo's last click
+ * do nothing for a reason nobody can see.
+ *
+ * An explicit `"0"` is still honoured as zero. "Unset" and "nothing may ever be
+ * refunded" are different instructions and must not collapse into each other.
+ */
+const DEFAULT_REFUND_CAP_CENTS = 10_000;
+
+function readCap(raw: string | undefined): number {
+  if (raw === undefined) return DEFAULT_REFUND_CAP_CENTS;
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+}
 
 /**
  * The model client, or null when one cannot be built.

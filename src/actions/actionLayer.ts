@@ -313,7 +313,9 @@ async function callExecutor(
       status: result.status === "completed" ? "succeeded" : "failed",
       providerRef: result.refundId,
       amountCents: result.amountCents,
-      message: `refund ${result.status}`,
+      // The binding's own reason when it has one, because "refund failed" beside
+      // an unwired executor tells an operator nothing they can act on.
+      message: result.message ?? `refund ${result.status}`,
     };
   }
 

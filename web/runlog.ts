@@ -36,11 +36,24 @@ export type RunStep = {
 };
 
 export type RunProposal = {
+  /**
+   * The approvable row's id.
+   *
+   * Present because this is something the screen acts on, not the model's opinion.
+   * The amount below is resolved from `savingCents` in the core — the model
+   * cannot supply one.
+   */
+  readonly id: string;
   readonly subId: string;
-  readonly action: "refund" | "cancel" | "downgrade" | "investigate" | "no_action";
-  readonly category: string;
-  readonly severity: number;
+  readonly kind: string;
+  readonly action: string;
   readonly rationale: string;
+  readonly severity: number;
+  readonly category: string;
+  /** Null for a cancellation: it moves no money. */
+  readonly amountCents: number | null;
+  readonly currency: string;
+  readonly status: string;
 };
 
 export type RunRejection = {
@@ -230,13 +243,77 @@ function readArray<T>(value: unknown, guard: (item: unknown) => item is T): T[] 
 function isProposal(item: unknown): item is RunProposal {
   if (typeof item !== "object" || item === null) return false;
   const p = item as Record<string, unknown>;
-  return typeof p["subId"] === "string" && typeof p["rationale"] === "string";
+  // `id` and `amountCents` are required, not optional: a proposal the screen
+  // cannot act on, or whose money figure is missing, is not a proposal it may
+  // render as if it were complete.
+  return (
+    typeof p["subId"] === "string" &&
+    typeof p["rationale"] === "string" &&
+    typeof p["id"] === "string" &&
+    (p["amountCents"] === null || typeof p["amountCents"] === "number")
+  );
 }
 
 function isRejection(item: unknown): item is RunRejection {
   if (typeof item !== "object" || item === null) return false;
   const r = item as Record<string, unknown>;
   return typeof r["reason"] === "string";
+}
+
+/**
+ * What the approve button is allowed to claim.
+ *
+ * Pure, and here rather than in the component, because this figure is what a
+ * merchant is agreeing to. Two rules:
+ *
+ * - a proposal with **no amount** contributes nothing, because a cancellation
+ *   moves no money and must not inflate a total about to authorise a payment;
+ * - the total is withheld across currencies, for the same reason `hero.ts` refuses
+ *   one — summing euros into dollars is a number that means nothing and looks
+ *   authoritative.
+ *
+ * Already-run proposals are excluded, so a replay of a completed run cannot
+ * present itself as something still waiting for approval.
+ */
+export type ApproveSummary = {
+  readonly cents: number;
+  readonly currency: string;
+  readonly count: number;
+  readonly currencies: readonly string[];
+  /** False when there is nothing worth a button. */
+  readonly available: boolean;
+};
+
+export function approveSummary(proposals: readonly RunProposal[]): ApproveSummary {
+  const pending = proposals.filter((p) => p.status === "proposed");
+  const payable = pending.filter((p) => p.amountCents !== null);
+
+  const currencies = [...new Set(payable.map((p) => p.currency))];
+  const mixed = currencies.length > 1;
+  const total = mixed ? 0 : payable.reduce((sum, p) => sum + (p.amountCents ?? 0), 0);
+
+  return {
+    cents: total,
+    currency: currencies[0] ?? "USD",
+    currencies,
+    count: payable.length,
+    available: payable.length > 0 && !mixed,
+  };
+}
+
+/**
+ * A readable label for a merchant key.
+ *
+ * No PayPal API returns a merchant name to anyone (`ARCHITECTURE.md` §11a), so
+ * the key *is* the identity and this only re-presents it. The raw key is rendered
+ * beside it rather than instead of it, because a label like "Netflix" is one
+ * skipped character away from being a claim the data does not support.
+ */
+export function merchantLabel(key: string): string {
+  const bare = key.startsWith("sub-") ? key.slice(4) : key;
+  const words = bare.replace(/[-_]+/g, " ").trim();
+  if (words.length === 0) return key;
+  return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
 /**

@@ -35,10 +35,12 @@
  */
 
 import { runAgent } from "@/agent/agent";
+import type { Proposal } from "@/agent/proposal";
 import type { ChatMessage, Completion, ToolSpec } from "@/agent/tools";
 import type { Recommendation } from "@/core/insights";
 import type { Database } from "@/db";
 import { appendRunStep } from "@/db/runLog";
+import { recordAgentProposals } from "@/services/actions";
 
 export type RunStepKind = "llm_call" | "tool_call" | "tool_result" | "rejected";
 
@@ -55,13 +57,27 @@ export type RunEvent =
     }
   | {
       readonly type: "done";
+      /**
+       * What is now approvable.
+       *
+       * `id` and `amountCents` are here because this is a row the screen acts on,
+       * not the model's opinion. `amountCents` is resolved from `savingCents` in
+       * the core and is null for a cancellation, which moves no money.
+       */
       readonly proposals: readonly {
+        readonly id: string;
         readonly subId: string;
+        readonly kind: string;
         readonly action: string;
-        readonly category: string;
-        readonly severity: number;
         readonly rationale: string;
+        readonly severity: number;
+        readonly category: string;
+        readonly amountCents: number | null;
+        readonly currency: string;
+        readonly status: string;
       }[];
+      /** Agent proposals that could not become rows, so the log can show them. */
+      readonly rejected: readonly string[];
       readonly rejections: readonly {
         readonly toolName: string;
         readonly reason: string;
@@ -169,20 +185,63 @@ export async function* streamAgentRun(options: StreamOptions): AsyncGenerator<Ru
       // Every step write the loop issued, awaited. `runAgent` cannot emit again
       // once it has resolved, so this set is complete by now.
       await Promise.all(pending);
-      close({
-        type: "done",
-        proposals: result.proposals.map((p) => ({
-          subId: p.subId,
-          action: p.action,
-          category: p.category,
-          severity: p.severity,
-          rationale: p.rationale,
-        })),
-        rejections: result.rejections,
-        turns: result.turns,
-        stoppedBecause: result.stoppedBecause,
-        finalText: result.finalText,
-      });
+
+      try {
+        /**
+         * The agent's proposals become approvable rows here, and this was the
+         * missing line: the run produced proposals that nothing wrote anywhere, so
+         * after a run the screen had a proposal and nothing to approve.
+         *
+         * The amount on each row is resolved from `savingCents` in the core — the
+         * proposal itself carries no figure and the schema would reject one.
+         */
+        const recorded = await recordAgentProposals({
+          db,
+          agentProposals: result.proposals,
+          findings: options.findings,
+          now,
+          runId,
+          idPrefix: runId,
+        });
+
+        close({
+          type: "done",
+          proposals: recorded.recorded.map((row) => ({
+            id: row.id,
+            subId: row.targetId ?? "",
+            kind: row.kind,
+            action: agentActionFor(result.proposals, row.targetId),
+            rationale: row.rationale ?? "",
+            severity: agentSeverityFor(result.proposals, row.targetId),
+            category: agentCategoryFor(result.proposals, row.targetId),
+            // Null for a cancellation: it moves no money, and `0` would read as
+            // "refunded nothing" beside a capture that had just been charged.
+            amountCents: row.amountCents,
+            currency: row.currency,
+            status: row.status,
+          })),
+          rejected: recorded.refused.map((r) => `${r.subId}: ${r.reason}`),
+          rejections: result.rejections,
+          turns: result.turns,
+          stoppedBecause: result.stoppedBecause,
+          finalText: result.finalText,
+        });
+      } catch (error: unknown) {
+        // The reason this is a `try` and not a `catch` bolted on afterwards.
+        // `insertProposal` can reject — a primary-key collision is enough — and
+        // when it did the rejection escaped this handler entirely, `close()` was
+        // never reached, and the generator waited on a promise nobody would ever
+        // resolve. The screen sat on "Running…" forever.
+        //
+        // A stream that cannot report its own failure is the worst shape a stream
+        // can have: from the client, silence and success look identical.
+        close({
+          type: "error",
+          message: `the run finished but its proposals could not be recorded: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        });
+      }
     },
     async (error: unknown) => {
       await Promise.all(pending);
@@ -207,12 +266,44 @@ export async function* streamAgentRun(options: StreamOptions): AsyncGenerator<Ru
 }
 
 /**
+ * The agent's own framing of a proposal, carried alongside the row.
+ *
+ * The row is authoritative for the money — `amountCents` comes from the finding,
+ * never from here. These are the model's own words about severity and category,
+ * kept because the run log is supposed to show what the agent thought, and a row
+ * stripped of the model's reasoning shows only what the core decided.
+ *
+ * Defaults are honest refusals rather than zeroes: a row with no matching
+ * proposal says "investigate" and severity 0, which reads as "not urgent",
+ * instead of inventing a confident answer.
+ */
+function agentActionFor(proposals: readonly Proposal[], subId: string | null): string {
+  return proposals.find((p) => p.subId === subId)?.action ?? "investigate";
+}
+
+function agentSeverityFor(proposals: readonly Proposal[], subId: string | null): number {
+  return proposals.find((p) => p.subId === subId)?.severity ?? 0;
+}
+
+function agentCategoryFor(proposals: readonly Proposal[], subId: string | null): string {
+  return proposals.find((p) => p.subId === subId)?.category ?? "healthy";
+}
+
+/**
  * A fresh run id.
  *
  * Prefixed so a run is identifiable in a D1 browser at 11pm during a demo without
  * a query. Not a UUID library — there is no need for one here and
  * `AGENTS.md` will not take a dependency for an id.
+ *
+ * The clock alone is not unique: two runs in the same millisecond would collide,
+ * and the run id is also the discriminator for proposal ids (see `idPrefix`).
+ * `AGENTS.md` will not take a dependency for that either, so the counter below is
+ * module-scoped and monotonic.
  */
+let runCounter = 0;
+
 export function newRunId(now: Date): string {
-  return `run-${now.toISOString().replace(/[^0-9]/g, "").slice(0, 14)}`;
+  runCounter += 1;
+  return `run-${now.toISOString().replace(/[^0-9]/g, "").slice(0, 14)}-${runCounter}`;
 }

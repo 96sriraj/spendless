@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { applyRunEvent, describeStep, emptyRunState, parseRunEvent, statusLine, type RunEvent } from "./runlog";
+import {
+  applyRunEvent,
+  approveSummary,
+  describeStep,
+  emptyRunState,
+  merchantLabel,
+  parseRunEvent,
+  statusLine,
+  type RunEvent,
+} from "./runlog";
 
 /**
  * The run log's reducer.
@@ -83,11 +92,16 @@ describe("applyRunEvent", () => {
       type: "done",
       proposals: [
         {
+          id: "act-run-1-1",
           subId: "sub-netflix",
+          kind: "refund",
           action: "refund",
           category: "idle_subscription",
           severity: 4,
           rationale: "No use recorded in three months.",
+          amountCents: 1_599,
+          currency: "USD",
+          status: "proposed",
         },
       ],
       rejections: [{ toolName: "delete_everything", reason: "not on the allowlist", detail: "", turn: 2 }],
@@ -132,6 +146,95 @@ describe("applyRunEvent", () => {
   });
 });
 
+/**
+ * What the approve button is allowed to claim.
+ *
+ * The sum here is what a merchant is agreeing to, so it is decided by a pure
+ * function rather than assembled in the component. Two rules matter:
+ *
+ * - a proposal with **no amount** contributes nothing, because a cancellation
+ *   moves no money and must not inflate a total that is about to authorise one;
+ * - the total is withheld across currencies, for the same reason `hero.ts`
+ *   refuses one — summing euros into dollars is a number that means nothing and
+ *   looks authoritative.
+ */
+describe("approveSummary", () => {
+  const p = (over: Partial<Parameters<typeof approveSummary>[0][number]> = {}) => ({
+    id: "act-1",
+    subId: "sub-a",
+    kind: "refund",
+    action: "refund",
+    rationale: "",
+    severity: 1,
+    category: "idle_subscription",
+    amountCents: 1_599,
+    currency: "USD",
+    status: "proposed",
+    ...over,
+  });
+
+  it("sums only the proposals that move money", () => {
+    const summary = approveSummary([
+      p({ id: "a", amountCents: 1_599 }),
+      p({ id: "b", amountCents: 500 }),
+      p({ id: "c", kind: "cancel_subscription", amountCents: null }),
+    ]);
+
+    expect(summary.cents).toBe(2_099);
+    expect(summary.count).toBe(2);
+    expect(summary.available).toBe(true);
+  });
+
+  it("says there is nothing to approve rather than offering $0.00", () => {
+    // A button reading "Approve $0.00" is a button that looks broken.
+    const summary = approveSummary([p({ kind: "cancel_subscription", amountCents: null })]);
+
+    expect(summary.cents).toBe(0);
+    expect(summary.count).toBe(0);
+    expect(summary.available).toBe(false);
+  });
+
+  it("offers nothing when there are no proposals at all", () => {
+    expect(approveSummary([]).available).toBe(false);
+  });
+
+  it("keeps every currency rather than mixing them", () => {
+    const summary = approveSummary([
+      p({ id: "a", amountCents: 1_000, currency: "USD" }),
+      p({ id: "b", amountCents: 1_000, currency: "INR" }),
+    ]);
+
+    expect(summary.currencies.length).toBe(2);
+    expect(summary.available).toBe(false);
+  });
+
+  it("ignores a proposal that has already run, so a replay cannot re-authorise it", () => {
+    expect(approveSummary([p({ status: "executed" })]).available).toBe(false);
+  });
+});
+
+describe("merchantLabel", () => {
+  it("reads the merchant key without inventing a brand", () => {
+    // No PayPal API returns a merchant name to anyone, so the key is the identity.
+    // This only re-presents it — and the component renders the raw key beside the
+    // label, because "Netflix" is one skipped character away from a claim the data
+    // does not support.
+    expect(merchantLabel("sub-netflix")).toBe("Netflix");
+  });
+
+  it("handles a hyphenated key", () => {
+    expect(merchantLabel("sub-adobe-creative-cloud")).toBe("Adobe creative cloud");
+  });
+
+  it("returns the key unchanged when there is nothing to clean up", () => {
+    expect(merchantLabel("sub-")).toBe("sub-");
+  });
+
+  it("leaves a key with no prefix alone", () => {
+    expect(merchantLabel("netflix")).toBe("Netflix");
+  });
+});
+
 describe("statusLine", () => {
   function done(overrides: Partial<Parameters<typeof statusLine>[0]> = {}) {
     return {
@@ -139,7 +242,18 @@ describe("statusLine", () => {
       phase: "done",
       turns: 3,
       proposals: [
-        { subId: "sub-a", action: "refund", category: "idle", severity: 4, rationale: "x" },
+        {
+          id: "act-run-1-1",
+          subId: "sub-a",
+          kind: "refund",
+          action: "refund",
+          rationale: "Idle for three months.",
+          severity: 4,
+          category: "idle_subscription",
+          amountCents: 1_599,
+          currency: "USD",
+          status: "proposed",
+        },
       ],
       rejections: [],
       ...overrides,
@@ -260,7 +374,18 @@ describe("parseRunEvent: the terminal frame", () => {
   const done = JSON.stringify({
     type: "done",
     proposals: [
-      { subId: "sub-netflix", action: "cancel", category: "idle_subscription", severity: 3, rationale: "Idle." },
+      {
+        id: "act-run-1-1",
+        subId: "sub-netflix",
+        kind: "refund",
+        action: "cancel",
+        category: "idle_subscription",
+        severity: 3,
+        rationale: "Idle.",
+        amountCents: 1_599,
+        currency: "USD",
+        status: "proposed",
+      },
     ],
     rejections: [{ toolName: "x", reason: "not on the allowlist", detail: "", turn: 2 }],
     turns: 3,
@@ -271,6 +396,22 @@ describe("parseRunEvent: the terminal frame", () => {
   it("reads a done frame, so the run can ever finish", () => {
     const event = parseRunEvent(`data: ${done}`);
     expect(event?.type).toBe("done");
+  });
+
+  it("drops a proposal it cannot safely render rather than rendering it incomplete", () => {
+    // A proposal with no `id` is not actionable, and one with no `rationale` says
+    // nothing. Rendering either as if it were complete would put an approve
+    // button on screen next to a figure the merchant cannot check.
+    const incomplete = JSON.stringify({
+      type: "done",
+      proposals: [{ subId: "sub-a", rationale: "no id" }],
+      rejections: [],
+      turns: 1,
+      stoppedBecause: "answered",
+      finalText: "",
+    });
+    const event = parseRunEvent(`data: ${incomplete}`);
+    expect(event).toMatchObject({ type: "done", proposals: [] });
   });
 
   it("carries the proposals and the rejections through intact", () => {
@@ -356,3 +497,4 @@ describe("parseRunEvent", () => {
     expect(event.type).toBe("step");
   });
 });
+
