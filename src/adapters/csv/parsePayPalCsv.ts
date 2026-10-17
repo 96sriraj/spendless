@@ -280,6 +280,11 @@ export function createCsvAccountSource(text: string): AccountSource {
   };
 
   const refuse = (capability: string, reason: string): never => {
+    // The `capability` field is the machine-readable one, so it carries the
+    // port's key rather than a phrase — the MCP adapter already reports
+    // `listDisputes`, and a caller that branches on this field has to work
+    // against both. The human-readable half is the message, which the key is
+    // interpolated into.
     throw new UnsupportedCapabilityError(capability, "csv", reason);
   };
 
@@ -300,11 +305,11 @@ export function createCsvAccountSource(text: string): AccountSource {
     },
 
     async listSubscriptions(): Promise<RawSubscription[]> {
-      return refuse("list subscriptions", "an activity export has no plan objects");
+      return refuse("listSubscriptions", "an activity export has no plan objects");
     },
 
     async listDisputes(): Promise<RawDispute[]> {
-      return refuse("list disputes", "an activity export has no dispute objects");
+      return refuse("listDisputes", "an activity export has no dispute objects");
     },
   };
 }

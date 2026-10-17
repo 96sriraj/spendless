@@ -220,8 +220,16 @@ describe("parsePayPalCsv — capabilities", () => {
   });
 
   it("should name the capability and the adapter in the error", async () => {
+    // The exact port key, not a phrase. It used to be `"list subscriptions"`,
+    // which read better in the message and broke every caller that branches on
+    // the field — the MCP adapter reports `listSubscriptions`, and a consumer of
+    // this error has to handle both. The human-readable half is the message.
     await expect(createCsvAccountSource(EXPORT).listSubscriptions()).rejects.toMatchObject({
-      capability: expect.stringContaining("subscriptions"),
+      capability: "listSubscriptions",
+      adapter: "csv",
+    });
+    await expect(createCsvAccountSource(EXPORT).listDisputes()).rejects.toMatchObject({
+      capability: "listDisputes",
       adapter: "csv",
     });
   });
