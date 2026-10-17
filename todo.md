@@ -26,41 +26,34 @@
 
 ## Progress
 
-> **Snapshot: Oct 9 2026, end of session 1.** **Phases 1 and 2 are complete and green.**
-> `bun run verify` runs typecheck plus 270 tests across all three tiers.
+> **Snapshot: Oct 17 2026.** `bun run verify` runs typecheck plus **471 tests** across all three
+> tiers, in 2.6s. **Phases 1 and 2 are complete and green.**
 >
-> **Phase 0 (the Spike) is still blocked** on H1-01..H1-04 — there is no
-> `PAYPAL_ACCESS_TOKEN`, so no sandbox call is possible and S-1..S-4 remain
-> unanswered. **Phases 3–9 are blocked downstream of it.** Nothing in this
-> session touched PayPal, an adapter, the UI or deployment.
+> **The blockers that froze this file for eight days are gone.** Both credentials work —
+> `bun run check-env` confirms a live PayPal sandbox token and a live OpenRouter completion. Two real
+> payments are captured server-side. The Spike is answered (see `spike-result.md` and
+> `ARCHITECTURE.md` §11c).
 >
-> That the Spike is blocked did not block Phases 1–2: they are build-order
-> items 1–3, depend on nothing but this machine, and are where the lifted head
-> start lives. The detector graph is now pure and the demo's e2e journey runs
-> green, so the Spike has somewhere to land when the token arrives.
+> **Phases 5–9 have not started, and they are the product.** No agent, no action layer, no approval
+> UI, no `ActionExecutor`, no UI, no deployment. The kill switch is Oct 20; the honest reading is
+> that the *read and capture* path is proven and **money-out is not**, because no code can issue a
+> refund yet. S-4-live is the most load-bearing question left and it is not a research question.
+>
+> Where the tree disagrees with this file, the tree wins. The boxes below were corrected against
+> artifacts on Oct 17 rather than left to imply work that did not happen.
 
-**Environment fixed first:** `bun` was not installed at all (v1.4.2 now), and the npm global prefix was
-missing from `PATH`. Vitest 5 declares Node ≥ 22 and `@types/node` ^22 but runs correctly on this
-machine's Node 20.18 — verified, not assumed.
-
-### Committed
+**Committed since the last snapshot**
 
 | Commit | What |
 |---|---|
-| `docs:` | The planning docs, plus TDD made load-bearing (three named tiers, rules, architecture gates as tests). |
-| `build:` | Strict TS scaffold and the three-tier vitest harness — `unit` / `integration` / `e2e` as real projects. |
-| `test:` | The architecture gates as failing tests, self-verified against synthetic violations. |
-| `refactor:` | `durableNotepad` → the `KVStore` port + D1 adapter; `schema.sql` with real columns. |
-| `feat:` | The 9 pure modules lifted, tests copied first and red before the sources. |
-| `feat:` | Currency widened to USD and INR, formatters parameterised. |
-| `feat:` | The 5 impure detectors onto `KVStore`, three lift defects fixed, both invariants under test. |
-| `fix:` | Duplicate detection made order-independent; raw similarity score rescaled. |
-| `test:` | The e2e vertical slice, plus the subscriptions and run-log repositories. |
-| `docs:` | **Desk research answers S-2 and S-3 without a token.** Corrects three design errors. |
-| `feat:` | The adapter ports, with identity provenance and `capabilities()` on the interface. |
-| `feat:` | Recurrence inference — the module the project actually needs once identity is seed-authored. |
-| `feat:` | `CsvAccountAdapter` — the only adapter that carries a real merchant name. |
-| `test:` | A guard so the architecture gate can never pass by scanning nothing. |
+| `feat:` | Order payload + identity markers — `spendless:`/plan keys written into the fields that survive |
+| `feat:` | `scripts/seed.ts` and `scripts/capture.ts` — orders created, approved in the browser, captured server-side. Two real captures landed |
+| `feat:` | Token provider — mint once, refresh ahead of the measured 9h TTL |
+| `feat:` | MCP stdio client + an envelope reader that cannot claim success on a malformed reply |
+| `feat:` | `chunkRange`, `identityScan`, `inspect`, `freshness`, `orderStatus` — the pieces an adapter composes from |
+| `fix:` | Transaction Search **lag is measured, not guessed** (`S-0-03b`), after "not seeded" was read as a bug when it was freshness |
+| `fix:` | A false POSITIVE on `S-2-live`, caused by trusting `transaction_subject` |
+| `build:` | `bun run check-env` — because "the variable is set" and "the credential works" are different claims |
 
 ### Deviations from the plan, and why
 
@@ -82,8 +75,15 @@ would otherwise have to reverse-engineer.
     the same account could be told to cancel a different bill from one run to the next.
   - A raw Jaro-Winkler score went into the same `confidence` field as an exact merchant match.
     "Netfliks" scored 0.98 against Netflix's 0.9 — a one-character typo outranked a certainty.
-- **`seed` is not in `package.json` yet.** It arrives with P4-01. A script pointing at a file that
-  does not exist is worse than no script.
+- **P4-01's "real API calls, not hand-inserted rows" is superseded (D5).** PayPal cannot backdate a
+  transaction, so no amount of real seeding produces the date spread recurrence inference needs. The
+  demo carries three labelled lanes instead. Recorded in `AGENTS.md` rather than absorbed.
+- **Capture happens server-side, not through the hosted page.** The approval screen approved the
+  payment and then failed to redirect back; the spinner was the redirect, not the payment. Removing
+  the browser from the capture path is a reliability fix, not a workaround.
+- **Card funding was deleted rather than left broken.** PayPal gates raw card data behind PCI SAQ D,
+  so `confirm-payment-source` with a test card returns 422. Dead code pretending to be a fallback is
+  worse than no fallback.
 
 ### Verified true
 
@@ -93,39 +93,50 @@ allow-list is at `D:\Github\nixt\worker\src\index.ts:42-57` (**not yet ported �
 
 ---
 
-## Phase 0 — The Spike (Oct 9–12) · **GO/NO-GO GATE**
+## Phase 0 — The Spike (Oct 9–12) · **GO/NO-GO GATE** · **answered Oct 17**
 
-> Nothing after this phase gets built until S-1..S-4 are answered. Run the queries **through
-> `paypal-local` MCP** where possible, not by reading docs — ARCHITECTURE.md §2 is inference, not fact.
+> **Status: the gate is closed — GO, on binding A.** The blocking H1 items cleared on Oct 16–17 and
+> `bun run spike` now reads real sandbox transactions. Evidence is in [`spike-result.md`](./spike-result.md)
+> (verdicts and field names only, no credentials) and `ARCHITECTURE.md` §11c.
 >
-> **Blocked by H1-01..H1-04** (PayPal developer account, sandbox business account, app credentials,
-> exported access token).
+> **Two of these remain open, and they are the two that matter for the demo:**
+>
+> - **S-4 (money-out) is untested.** No refund and no cancellation has ever been executed, because
+>   `ActionExecutor` has no implementation. Reachability is not the same as a working action, and the
+>   dispute lane is a live example of the difference — HTTP 200 on the buyer's namespace.
+> - **S-1 was never run against a personal account.** Binding B is confirmed *structurally*
+>   (§11a), not empirically. That is enough to proceed and it is why nothing in the build depends on B.
 
 - [ ] **S0-01** `[opencode.jsonc]` Enable the `paypal-local` MCP server (`disabled: false`) after `PAYPAL_ACCESS_TOKEN` is exported → expect `/mcps` shows it connected, not `needs authentication`
+  - **Still open, and mechanically so:** `paypal-local` wants `PAYPAL_ACCESS_TOKEN` in the
+    environment, while every script mints its own from client credentials. Nothing is blocked on it —
+    `stdioClient` drives the same server directly — so do this only for interactive poking.
   - A server showing `needs authentication` is *configured*, not *connected*. Finish it in `/mcps`.
-  - Refresh the token proactively — sandbox tokens live **3–8 hours** (`AGENTS.md`).
-- [ ] **S0-02** `[PayPal Dashboard]` Confirm the connected account is a **business** account with **Transaction Search** enabled on the app → expect the exact permission state recorded here
-  - This is the assumption ARCHITECTURE.md §2 rests on. Confirm or refute it before anything else.
-- [ ] **S0-03** **`list_transactions`** Call it against the sandbox for a recent date range → expect a response; record whether it succeeds, fails, or returns empty
+  - Refresh the token proactively — sandbox tokens live **9 hours** (measured, not the 3–8h on record).
+- [x] **S0-02** `[PayPal Dashboard]` Confirm the connected account is a **business** account with **Transaction Search** enabled on the app → **DONE.** Toggle confirmed on; `/v1/catalogs/products` returns 200 with the merchant-only shape. (`/v1/identity/.../account/get` 404s on the sandbox host — wrong endpoint path, not a wrong account.)
+- [x] **S0-03** **`list_transactions`** Call it against the sandbox for a recent date range → **DONE.** 4 transactions across a 90-day request, correctly split into 3 calls because PayPal caps a window at 31 days.
 - [ ] **S1 (Spike)** `[PayPal REST + OAuth]` Test OAuth login on a **personal** sandbox account and attempt a consumer-side activity read → expect a definitive yes/no recorded here
-  - **This is the decision point.** If consumer-side read *is* possible, ARCHITECTURE.md §3 and
-    §2 simplify substantially. If not, binding A (merchant-side) is confirmed. Write the answer into
-    ARCHITECTURE.md and replace this box with the evidence.
-- [ ] **S2 (Spike)** **`create_subscription_plan` → `create_subscription` → capture → `list_transactions`** Re-query after capture and **dump the actual response fields** → expect merchant name, amount, date, `custom_id` present or absent — recorded verbatim
-  - **The one that quietly kills projects.** Without merchant-level identity the lifted detectors
-    have no input. Check it before anything else.
-  - Paste the real field list into ARCHITECTURE.md §11. Do not paraphrase it.
-- [ ] **S3 (Spike)** **`@paypal/mcp --tools=all`** Call each tool once against the sandbox: `list_transactions`, `create_refund`, `get_refund`, `list_disputes`, `get_dispute`, `accept_dispute_claim`, `cancel_subscription`, `show_subscription_details`, `update_subscription`, `create_subscription_plan`, `create_subscription`, `create_order`, `pay_order` → expect a working / non-working / missing verdict per tool
-  - Replace the assumption table in ARCHITECTURE.md §2 with the measured result.
-- [ ] **S4 (Spike)** **`create_refund` on the S-2 capture · `cancel_subscription` on a live sub** → expect both to succeed end-to-end with real sandbox money moved
-  - This is the "it acts" claim. If refund works, the action layer is real. If it does not, say so now.
-- [ ] **S0-04** `[PayPal sandbox]` Force a dispute, then exercise `/v1/customer/disputes/{id}/adjudicate` and `/v1/customer/disputes/{id}/require-evidence` (sandbox-only) → expect a dispute that can be accepted by the agent
-- [ ] **S0-05** `[measure]` Time a sandbox access token from issue to 401 → expect the real TTL, recorded (docs say 3–8h)
-- [ ] **S0-06** `[ARCHITECTURE.md §11]` Write the S-1..S-5 results back into the doc → expect the ⚠️ "inferred, not verified" warning either struck or replaced with evidence
-- [ ] **S0-07** `[GO/NO-GO — Oct 12]` Make the call → expect a recorded decision
-  - **Go** → continue to Phase 1.
-  - **No-go on consumer-side, go on merchant-side** → the default expected path. Proceed; binding A is the demo.
-  - **No-go on both** → escalate to the founder immediately. Do not start Phase 1 against a dead integration.
+  - **Not run.** The structural case against B is strong and §11a explains it, but this stays open
+    because "absence of evidence" was written here for a reason. Nothing depends on the answer.
+- [x] **S2 (Spike)** **`create_subscription_plan` → `create_subscription` → capture → `list_transactions`** Re-query after capture and **dump the actual response fields** → **DONE, with a narrower answer than planned.**
+  - **Only `transaction_subject` survives the round trip.** `invoice_id` and `custom_field` are both
+    present in the response and both **fail to carry our value** — the key moved into the
+    subject/description, and `seedMarker` writes it there.
+  - The field dump is in `spike-result.md`; §11c has the reasoning, including a false POSITIVE that
+    came from trusting the subject and a **measured** Transaction Search lag (`S-0-03b`) that made
+    "not seeded" look like "broken".
+- [ ] **S3 (Spike)** **`@paypal/mcp --tools=all`** Call each tool once against the sandbox → **desk research answered this (46 tools, §11a); the live per-tool sweep never happened.** The two tools that carry "it acts" — refund and cancel — have never been called. Treat S3 as open for that reason, not for the other 44.
+- [ ] **S4 (Spike)** **`create_refund` on the S-2 capture · `cancel_subscription` on a live sub** → **OPEN, and the most load-bearing item in the repo.**
+  - Nothing about this is uncertain. A refund is one POST against credentials that are live and
+    verified. It has not been written, which is `todo.md` P7-01/P7-02, not a spike question.
+  - Until one succeeds, the demo cannot claim "it acts", and the README, run log and video must not
+    imply otherwise.
+- [ ] **S0-04** `[PayPal sandbox]` Force a dispute, then exercise `/v1/customer/disputes/{id}/adjudicate` and `/require-evidence` → **half answered.** Merchant credentials reach the endpoint (**HTTP 200**), which refuted the prediction that they would be rejected. It is the **buyer's** namespace and does not list disputes *raised against* the merchant, so reachable ≠ usable.
+  - **Recommended: cut it.** Refund + cancel carry "it acts" on their own, and `AGENTS.md` says cut
+    rather than fake. Only revisit if the seed produces something worth disputing.
+- [x] **S0-05** `[measure]` Time a sandbox access token from issue to 401 → **DONE.** The OAuth response says `expires_in=32400` = **9.0h**, against the 3–8h the docs claim. `tokenProvider` refreshes at 432m. Waiting for a real 401 is opt-in via `SPIKE_MEASURE_TTL=1`.
+- [x] **S0-06** `[ARCHITECTURE.md §11]` Write the S-1..S-5 results back into the doc → **DONE.** §11a (desk), §11b (status), §11c (live, Oct 15–17). The ⚠️ "inferred, not verified" warning in §2 is now struck with evidence.
+- [x] **S0-07** `[GO/NO-GO — Oct 12]` Make the call → **DONE Oct 17: GO, on binding A.** Merchant-side demo; CSV stays a fallback adapter, not a substitute. Recorded in `human-todo.md` (*Decision closed*) and `ARCHITECTURE.md` §12.
 
 ---
 
@@ -199,61 +210,93 @@ allow-list is at `D:\Github\nixt\worker\src\index.ts:42-57` (**not yet ported �
 
 ---
 
-## Phase 3 — The adapter (Oct 14–16) · **partly done; MCP/REST blocked on H1-04**
+## Phase 3 — The adapter (Oct 14–16) · **unblocked; the MCP adapter itself is still unwritten**
 
-> **P3-01 (the ports) and P3-04 (the CSV adapter) are complete** — neither needs a network call.
-> `McpPayPalAdapter` and `RestPayPalAdapter` cannot start until H1-04 gives us `PAYPAL_ACCESS_TOKEN`.
+> **Status Oct 17.** P3-01, P3-04, P3-05 and P3-07 are done. **P3-02 is plumbing without an adapter**,
+> and P3-03, P3-06 are open. The unblocking credential arrived, which changed what could be built —
+> it did not change what was built.
 >
 > **§11a desk research answered S-2 and S-3 without a token.** Read that section before starting
 > P3-02: the MCP tool is lossy in two known ways, `listTransactions` is capped at 31 days per call,
 > the plan schema is USD-only, and **the dispute tools are the buyer's, not the merchant's**.
 
-- [x] **P3-01** `[src/adapters/AccountSource.ts]` Define `AccountSource` + `ActionExecutor` exactly as ARCHITECTURE.md §3 specifies → expect the two interfaces compiling and nothing above them importing MCP or REST
-  - Done, with three corrections research forced in (§11a): `listTransactions` must **chunk**, since PayPal caps a
-    window at 31 days and the MCP wrapper clamps silently; `RawTransaction` carries **`identitySource`** beside
-    `merchantKey`, because no PayPal API returns a merchant name to anyone; and **`capabilities()`** is on the
-    interface, so the dispute lane reports itself unavailable instead of 403-ing on camera.
-- [ ] **P3-02** `[src/adapters/mcp/]` `McpPayPalAdapter` driving the **same stdio server** the `paypal-local` MCP entry runs (`npx -y @paypal/mcp --tools=all`, `PAYPAL_ENVIRONMENT=SANDBOX`, client-credentials) → expect `listTransactions`, `listSubscriptions`, `listDisputes` returning real sandbox data
+- [x] **P3-01** `[src/adapters/AccountSource.ts]` Define `AccountSource` + `ActionExecutor` exactly as ARCHITECTURE.md §3 specifies → **DONE**, with three corrections research forced in (§11a): `listTransactions` must **chunk**, since PayPal caps a window at 31 days and the MCP wrapper clamps silently; `RawTransaction` carries **`identitySource`** beside `merchantKey`, because no PayPal API returns a merchant name to anyone; and **`capabilities()`** is on the interface, so the dispute lane reports itself unavailable instead of 403-ing on camera.
+  - `ActionExecutor` is declared. **It has no implementation**, and until one does, no refund or
+    cancellation can be issued. That is P7, and it is why S-4-live is still open.
+- [ ] **P3-02** `[src/adapters/mcp/]` `McpPayPalAdapter` driving the **same stdio server** the `paypal-local` MCP entry runs → expect `listTransactions`, `listSubscriptions`, `listDisputes` returning real sandbox data
+  - **Everything underneath it is built and tested:** `stdioClient` (real server, real dispatch),
+    `mcpEnvelope` (cannot report success on a malformed reply), `tokenProvider`, `chunkRange`
+    (the 31-day split), `identityScan` (scans every row, not just the first), `inspect`, `freshness`.
+  - **What is missing is the adapter that composes them.** Until it exists, the read path runs through
+    `scripts/spike.ts` rather than through `AccountSource` — which means nothing in `src/` consumes a
+    live transaction yet, and the e2e journey runs against fixtures.
   - **Known lossiness, from reading the toolkit source:** no `fields=all` (so no `payer_info`), no
-    `transaction_type` (so no server-side recurring filter — do it client-side off `transaction_event_code`), and
-    the subscription-plan schema is **USD-only**. Chunking is mandatory.
+    `transaction_type` (so no server-side recurring filter — do it client-side off
+    `transaction_event_code`), and the subscription-plan schema is **USD-only**. Chunking is mandatory.
 - [ ] **P3-03** `[src/adapters/rest/]` `RestPayPalAdapter` — the escape hatch for what the toolkit lacks → expect at least one method that the MCP path could not serve
-- [x] **P3-04** `[src/adapters/csv/]` `CsvAccountAdapter` — parses a PayPal activity export, **read-only** → expect a consumer-narrative fixture parsing without any network call
-  - Done, and §11a made it **more important than planned**: a consumer export is the only PayPal surface that
+  - **Deferred deliberately, and the deferral is now evidence-backed rather than assumed.** Everything
+    the REST escape hatch was wanted for has been reached directly by a script: order create/capture,
+    Transaction Search, disputes, subscriptions. A REST adapter earns its place when it serves a
+    method the MCP path provably cannot — not because the plan named it.
+- [x] **P3-04** `[src/adapters/csv/]` `CsvAccountAdapter` — parses a PayPal activity export, **read-only** → **DONE.** `createCsvAccountSource` in `src/adapters/csv/parsePayPalCsv.ts`.
+  - §11a made it **more important than planned**: a consumer export is the only PayPal surface that
     names the payee, so this is where the lifted detectors get a real merchant identity.
-  - Two hazards handled: PayPal localises export dates (MM/DD vs DD/MM guessed wrong would silently shift every
-    renewal window — detected from the data, and **refused** when undeterminable), and amounts are normalised to
-    positive magnitudes with direction carried by `status`/`subject`.
-  - `capabilities()` claims read access only; `listSubscriptions`/`listDisputes` throw a typed error rather than
-    returning `[]`, because "no disputes" and "cannot see disputes" are different answers.
-- [ ] **P3-05** `[grep]` Run `grep -rn "openai\|@paypal/agent-toolkit\|node:fs" src/` and confirm **no module above the adapter layer imports any of them** → expect zero hits outside `src/adapters/`
-  - Redundant with P1-04 — keep it as a one-glance manual confirmation, but the failing test is what actually holds the line.
+  - Two hazards handled: PayPal localises export dates (MM/DD vs DD/MM guessed wrong would silently shift
+    every renewal window — detected from the data, and **refused** when undeterminable), and amounts are
+    normalised to positive magnitudes with direction carried by `status`/`subject`.
+  - `capabilities()` claims read access only; `listSubscriptions`/`listDisputes` throw a typed error rather
+    than returning `[]`, because "no disputes" and "cannot see disputes" are different answers.
+- [x] **P3-05** `[grep]` Run `grep -rn "openai\|@paypal/agent-toolkit\|node:fs" src/` and confirm **no module above the adapter layer imports any of them** → **DONE.** Zero hits outside `src/adapters/`, and the gate in `architecture.test.ts` is what actually holds the line — plus a guard so the gate cannot pass by scanning nothing.
 - [ ] **P3-06** `[test/integration]` Contract tests: all three adapters satisfy the same `AccountSource` shape → expect one shared contract suite run against MCP, REST, and CSV, green with **no live PayPal call**
-  - The suite must assert the two §11a properties, not just shape: that a >31-day `listTransactions` returns
-    every day (the chunking rule), and that a capability reported `false` **throws** rather than returning empty.
-  - The CSV adapter can run in this suite today. MCP and REST join it at P3-02/P3-03.
-- [ ] **P3-07** `[src/services/token.ts]` Token refresh ahead of the 3–8h sandbox TTL (use the measured value from S0-05) → expect a refresh with margin, never a mid-demo 401
-  - `[unit]` for the expiry maths with an injected clock; `[integration]` for the refresh against a local HTTP server. No test waits on wall-clock time.
+  - **The CSV side of this is effectively covered** — `parsePayPalCsv.test.ts` asserts both §11a
+    properties directly: capabilities that report `false` **throw** rather than returning empty, and
+    amounts/dates survive the round trip. MCP and REST cannot join it until P3-02/P3-03 exist.
+  - Promote that coverage into a shared suite rather than writing it twice when the second adapter lands.
+- [x] **P3-07** `[src/services/token.ts]` Token refresh ahead of the sandbox TTL → **DONE**, as `src/adapters/token.ts` + `tokenProvider.ts`.
+  - `[unit]` for the expiry maths with an injected clock; `[integration]` against a local HTTP server. No test waits on wall-clock time.
+  - Refresh margin comes from the **measured** TTL — `expires_in=32400` = 9h, refresh at 432m — not the 3–8h the docs claimed.
 
 ---
 
-## Phase 4 — Seed + run log (Oct 16–18)
+## Phase 4 — Seed + run log (Oct 16–18) · **the scripts exist; the UI does not**
 
 > Build order 5 and 6. The seed makes the demo rehearsable; the run log is the highest-leverage
 > item for scoring (`ARCHITECTURE.md` §9).
+>
+> **Two real captures have landed** (`31F89528X81443109`, `6YN00176GH7185627`) through
+> `bun run seed` → approve in the browser → `bun run capture --capture`. The browser is off the
+> critical path: the capture is a server-side POST, so the demo does not depend on a hosted page
+> redirecting back.
 
-- [ ] **P4-01** `[scripts/seed.ts]` Seed-the-scenario: create real plans and subscriptions through **real API calls** (not hand-inserted rows) → expect a repeatable merchant scenario in sandbox
-  - Demo reliability beats features. No hand-crafted state.
+- [ ] **P4-01** `[scripts/seed.ts]` Seed-the-scenario: create real plans and subscriptions through **real API calls** (not hand-inserted rows) → **partly done, and the instruction itself is superseded.**
+  - **Done:** `scripts/seed.ts` writes real Orders through the real API, and `scripts/capture.ts`
+    captures server-side. That is real API calls and real money moving.
+  - **Not done:** subscription *plans*. PayPal cannot backdate a transaction, so no amount of real
+    seeding produces the date spread recurrence inference needs — gaps of `[0, 0]` read as
+    `irregular`. **D5 replaces the instruction:** three labelled lanes (live sandbox, seeded history,
+    CSV) instead of one pure lane.
   - `[unit]` for the scenario builder's plan derivation; `[e2e]` for the seeding run itself.
 - [ ] **P4-02** `[run_steps]` Persist every LLM call, tool call, and result → expect a row per step with enough detail to replay the reasoning
+  - **The store exists and round-trips** (`src/db/runLog.ts`, covered in `test/integration/repositories.test.ts`),
+    and the e2e journey replays a run. **Nothing writes real steps**, because there is no agent yet
+    (Phase 5) and no live `AccountSource` to record against (P3-02).
 - [ ] **P4-03** `[ui]` Render the run log as a timeline → expect the video can *show* the reasoning rather than ask a judge to trust an assertion
+  - **There is no UI of any kind in this repo yet.** This is the highest-leverage scoring item in the
+    plan and it has not been started. `ARCHITECTURE.md` §9 says so; this is the reminder.
 - [ ] **P4-04** `[test/integration]` Run-log write + read round-trip, and ordering/timestamping → expect a replay to reconstruct the exact sequence, including out-of-order tool results
+  - Round-trip is covered; **ordering under out-of-order tool results is not.** Write it when the
+    agent exists, because that is what produces them.
 
 ---
 
-## Phase 5 — The agent (Oct 18–19) · **no execution yet**
+## Phase 5 — The agent (Oct 18–19) · **no execution yet** · **NOT STARTED**
 
 > Build order 7. **Deliberately before the action layer** so the demo degrades gracefully.
+>
+> **This is the eligibility gate.** Criterion #1 is PayPal *and* AI, and this phase is the AI half.
+> The credential is ready and unused: `bun run check-env` gets a real completion from
+> `meta-llama/llama-3.1-8b-instruct` (D2). Phases 6 and 7 both wait on this, so it is the shortest
+> path to something demoable.
 
 - [ ] **P5-01** `[src/agent/]` Bounded loop with a typed tool allowlist — **not** a free-roaming agent → expect a hard cap on turns and a closed tool set; reproducible output, no hallucinated actions
 - [ ] **P5-02** `[src/agent/tools.ts]` OpenRouter client, cheap instruct model, structured tool output → expect schema-valid responses on the test set
@@ -269,7 +312,14 @@ allow-list is at `D:\Github\nixt\worker\src\index.ts:42-57` (**not yet ported �
 
 ---
 
-## Phase 6 — Action layer + approval UI (Oct 19–20) · **kill-switch date**
+## Phase 6 — Action layer + approval UI (Oct 19–20) · **kill-switch date** · **NOT STARTED**
+
+> **Nothing in this phase exists** — no `src/actions/`, no approval UI, no `ActionExecutor`
+> implementation. Every bullet below is a spec, not a description of code.
+>
+> **P6-01 is what unblocks the kill switch.** `AGENTS.md`'s condition is the integration working
+> end-to-end, and read + capture is proven; **money-out is not**, because no code can issue a refund.
+> That is S-4-live, and P7-01 is the call. Do not record the kill switch as safe until it returns 201.
 
 - [ ] **P6-01** `[src/actions/]` `proposal → approval → execution → result`, **all four persisted** → expect a complete audit trail per action; nothing throwaway
 - [ ] **P6-02** `[ui]` Approval UI: a proposal cannot execute without explicit human approval → expect refunds are never autonomous
@@ -283,9 +333,16 @@ allow-list is at `D:\Github\nixt\worker\src\index.ts:42-57` (**not yet ported �
 
 ---
 
-## Phase 7 — Execution (Oct 20–24) · **depends on S-4, P6**
+## Phase 7 — Execution (Oct 20–24) · **depends on S-4, P6** · **NOT STARTED**
+
+> **P7-01 is the single most valuable item in this file.** It is one POST against credentials that
+> are already verified working. It is also the only thing standing between this project and a
+> defensible "it acts". Everything else in Phases 6–8 is worth less until it returns 201.
 
 - [ ] **P7-01** `[src/adapters/mcp/]` `refund` against a real sandbox capture → expect the refunded amount and `get_refund` to agree
+  - The captures to refund exist: `31F89528X81443109`, `6YN00176GH7185627`. **Nothing in this repo can
+    issue a refund yet** — `ActionExecutor` is an interface with no implementation. Test-first, like
+    everything else: the `ActionExecutor` contract test comes before the executor.
 - [ ] **P7-02** `[src/adapters/mcp/]` `cancelSubscription` against a live subscription → expect the subscription to end, verified by `show_subscription_details`
 - [ ] **P7-03** `[src/adapters/mcp/]` `listDisputes` / `getDispute` / `acceptDisputeClaim` → expect a dispute resolved end to end in the scenario seeded in Phase 4
 - [ ] **P7-04** `[test/e2e]` Full action lifecycle against sandbox, **skipped unless `PAYPAL_ACCESS_TOKEN` is set** → expect green in sandbox, clean skip in CI
@@ -341,7 +398,9 @@ listed here because a test that is not run is not a gate — `bun run verify` ru
 
 ## What not to do
 
-- Do not start anything past Phase 0 with S-1..S-4 unanswered.
+- Do not start anything past Phase 0 with S-1..S-4 unanswered. **(Phase 0 closed Oct 17 — GO on
+  binding A. What remains unanswered is S-4-live, and it is answered by writing P7-01, not by
+  reading documentation.)**
 - Do not add a free-roaming agent, an ORM, multi-tenant auth, or a domain.
 - Do not put a secret in a committed file.
 - Do not let the LLM compute a money figure or choose a refund amount.
