@@ -138,15 +138,25 @@ Three corrections, each forced by §11a rather than by taste:
 
 | Adapter | Binds | Notes |
 |---|---|---|
-| `McpPayPalAdapter` | `PAYPAL_ENVIRONMENT=SANDBOX` | Primary. Client-credentials, in-process. USD-only. Lossy: no `fields=all`, no `transaction_type`. **Not built yet.** |
-| `RestPayPalAdapter` | Same | Escape hatch for what the toolkit lacks — chiefly `fields=all` and `transaction_type`. **Not built yet.** |
+| `McpPayPalAdapter` | `PAYPAL_ENVIRONMENT=SANDBOX` | Primary. Client-credentials, in-process. **Built and proven live** (28 tools, real reads, real refund). Lossy: no `fields=all`, no `transaction_type`, **no refund amounts**. |
+| `RestPayPalAdapter` | Same | Escape hatch for what the toolkit lacks. **Not built.** Its case has weakened now that MCP is proven — but "cannot report refund amounts" is a genuine reason to want it. |
 | `CsvAccountAdapter` | Consumer narrative | Parses PayPal activity export. Read-only. **The only adapter that carries real merchant identity**, because a consumer export *does* name the payee. **Built and tested.** |
 
-**Status Oct 17.** The CSV adapter is real (`createCsvAccountSource`, `src/adapters/csv/`). Neither
-PayPal adapter exists yet — but the plumbing underneath one does: `stdioClient` and `mcpEnvelope`
-speak MCP to the real server, `tokenProvider` mints and refreshes, `chunkRange` enforces the 31-day
-split, `identityScan` and `inspect` read Transaction Search. `McpPayPalAdapter` is composition, not
-discovery. **No `ActionExecutor` exists at all**, so no refund or cancellation has ever been issued.
+**Status Oct 17.** Both the CSV adapter and the MCP adapter exist. `McpPayPalExecutor` sits on the
+same connection and has issued a **real refund**, full and partial, confirmed by `get_refund` —
+evidence in `spike-result.md`. `listSubscriptions` throws rather than returning an unopened `[]`;
+the Billing v1 mapping is not written.
+
+**What the live run cost, and it was worth it:** three defects that no unit test could see, because
+none of them are about our code — they are about the process and protocol boundaries.
+
+1. PayPal's MCP server **reports HTTP failures as successful tool results** — `{ ok: false, status:
+   422, … }` inside a normal result, not the MCP `isError` flag. A failed read looked like an empty
+   account; a failed cancellation looked like a success. Fixed in `mcpEnvelope.ts`.
+2. `create_refund` returns **no amount field**, so `RefundResult.amountCents` is `number | null`.
+   `0` would have meant "refunded nothing" beside a reversed capture.
+3. The server must be spawned **from Node, not Bun** — from Bun it boots and never answers
+   `initialize`.
 
 **Rule: no module above this layer may import `openai`, `@paypal/agent-toolkit`, or `node:fs`.**
 That is the whole risk hedge in one seam. If MCP covers everything, delete the others and nothing
@@ -494,14 +504,15 @@ build depends on B being possible.
 |---|---|---|
 | **S-0-01/02/03** | Business account, Transaction Search enabled, `list_transactions` returns anything? | ✅ **Answered.** Business account, permission on, 4 transactions returned across 3 chunked calls. |
 | **S-2-live** | Does a merchant-written identity come back? | ✅ **Answered, negatively and narrowly.** Only `transaction_subject` survives; `invoice_id` and `custom_field` are returned but do not carry our value. |
-| **S-3-live** | Which of the 46 tools authenticate and succeed? | ⚠️ **Partly.** Refund and cancel are the two that matter for "it acts", and **neither has been called.** |
-| **S-4-live** | Refund + cancel end to end? | ❌ **OPEN — and it is the most load-bearing question left.** No code can issue either one. |
-| **S-0-04** | Can merchant credentials touch `/v1/customer/disputes` usably? | ⚠️ **Reachable (HTTP 200), not shown usable.** It is the buyer's namespace and does not list disputes *against* the merchant. Cut from the demo unless proven otherwise. |
+| **S-3-live** | Which of the 46 tools authenticate and succeed? | ✅ **Answered where it counts.** 28 tools enumerated live; `list_transactions`, `create_refund`, `get_refund` called successfully. `cancel_subscription` unexercised. |
+| **S-4-live** | Refund + cancel end to end? | ✅ **Answered for refund — the kill-switch question, closed.** Full and partial refunds both `COMPLETED`, confirmed by an independent `get_refund`. ⚠️ **Cancellation untested**: no subscriptions exist and PayPal cannot create a backdated one. |
+| **S-0-04** | Can merchant credentials touch `/v1/customer/disputes` usably? | ⚠️ **Reachable (HTTP 200), not shown usable.** It is the buyer's namespace. **Cut from the demo** — `McpPayPalExecutor.resolveDispute` declines structurally and calls no tool. |
 | **S-0-05** | Real token TTL | ✅ **Answered.** `expires_in=32400` = 9h, against the 3–8h in `AGENTS.md`. |
 
-**S-4-live is now the sharpest question, and it is not a research question.** Nothing about it is
-uncertain — a refund is one POST and the credentials are live. It simply has not been written. That
-is `todo.md` P7-01/P7-02, and until one succeeds, "it acts" is an aspiration rather than a claim.
+**S-4-live was the sharpest question for eight days, and answering it took one test run.** It was
+never a research question — a refund is one call against live credentials. What it actually took
+was *our half* working: the transport, the tool name, the argument shape, the envelope, and the
+result mapping. Three of those were broken, and all three were invisible to unit tests.
 
 ### 11c. Live result — 2026-10-15, first real sandbox call
 
@@ -711,16 +722,18 @@ about identity. Worth having — but it must not be mistaken for the answer.
 | 1 | Replace `durableNotepad` with DB adapter; get the detector graph pure | — | ✅ Done |
 | 2 | Copy the 9 files + 6 test files; get them green with zero mocks | 1 | ✅ Done |
 | 3 | Currency pass → `["USD","INR"]` | 2 | ✅ Done |
-| 4 | `McpPayPalAdapter`, in-process, sandbox | S-2, S-3 | 🟡 Plumbing only — client, envelope, token, chunking, identity scan. No adapter. |
+| 4 | `McpPayPalAdapter`, in-process, sandbox | S-2, S-3 | ✅ Done — plus `McpPayPalExecutor`, proven against real money |
 | 5 | Seed-the-scenario script | 4 | 🟡 `scripts/seed.ts` + `scripts/capture.ts` exist and have moved real money. Orders, not subscription plans — and plans cannot be backdated (see `AGENTS.md`, *the second gap*). |
 | 6 | Run log persisted + rendered | 4 | 🟡 Repository and e2e replay exist; nothing writes real steps yet, and nothing renders it. |
 | 7 | Agent: classify → rank → propose. No execution yet. | 2, 6 | ❌ Not started. This is the eligibility gate. |
-| 8 | Action layer + approval UI | 7 | ❌ Not started. |
-| 9 | Execution: refund, cancel. Guardrails on. **Dispute lane only if S-0-04 proves merchant credentials can reach it.** | S-4, 8 | ❌ Not started. **S-4-live is unanswered: nothing has issued a refund.** |
-| 10 | **Stretch:** expose spendless as an MCP server — cheap, and puts you in the MCP-server prize track | 9 | ❌ Not started |
+| 8 | Action layer + approval UI | 7 | ❌ Not started. **The executor exists; the approval step in front of it does not.** |
+| 9 | Execution: refund, cancel. Guardrails on. | S-4, 8 | 🟡 **Refund done and proven live.** Cancellation untested; guardrails and approval not started. |
+| 10 | **Stretch:** expose spendless as an MCP server | 9 | ❌ Not started |
 
-Steps 1–3 are complete and green. Everything from 7 down is untouched, which is why the honest
-summary of this project on Oct 17 is: **the deterministic core is finished, and the product is not.**
+Steps 1–3 are complete and green, and step 4 turned out to be the one that mattered most: the
+adapter layer is where every hidden assumption in this plan got tested against reality, and three
+of them were wrong. Steps 7 and 8 are untouched, which is why the honest summary of this project
+on Oct 17 is: **the core and the PayPal integration are finished; the product is not.**
 
 Step 7 before 8 before 9 is deliberate: the agent produces *proposals* long before it can move
 money, so the demo degrades gracefully. A working "reads and reasons" demo beats a broken

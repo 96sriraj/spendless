@@ -3,16 +3,18 @@
 **The AI agent that spends less, not more.** PayPal AI Hackathon entry (Devpost: [Build What's Next with PayPal and AI](https://paypalaihackathon.devpost.com)).
 
 > **Snapshot 2026-10-17.** Phases 1–2 are **done and green** (`bun run verify` = typecheck +
-> 471 tests). The PayPal sandbox account, app and credentials are **live**, and money has moved:
-> two orders captured server-side. Both credentials pass `bun run check-env`.
+> 512 tests). The PayPal sandbox account, app and credentials are **live**. Money has moved **both
+> ways**: two orders captured, and a real refund issued end to end through the product path. Both
+> credentials pass `bun run check-env`.
 > Read `README.md` (scope + business case) and `ARCHITECTURE.md` (how it gets built, in what
 > order) before writing code. Both are the source of truth — this file only records what an agent
 > would otherwise get wrong.
 >
-> **What is NOT built yet, and it is most of the product:** the agent (Phase 5), the action layer
-> and approval UI (Phase 6), execution — any `ActionExecutor` at all (Phase 7), and any UI or
-> deployment (Phases 4, 8). Do not assume a refund or cancellation has ever been issued; nothing in
-> this repo has issued one. `ActionExecutor` is an interface with zero implementations.
+> **What is NOT built yet, and it is most of the product:** the agent (Phase 5), the action layer's
+> `proposal → approval → execution` chain and its approval UI (Phase 6), and any UI or deployment
+> (Phases 4, 8). `McpPayPalExecutor` can issue a refund and does, but **nothing above it decides
+> whether to** — there is no approval step and no guardrail. Do not describe the demo as having a
+> safety model until Phase 6 exists.
 >
 > **Work the queues:** [`todo.md`](./todo.md) is the agent lane, [`human-todo.md`](./human-todo.md)
 > is the founder lane. The agent lane blocks on anything marked 🔴 there (PayPal business account,
@@ -24,10 +26,10 @@
 - **Two hard eligibility requirements: meaningful PayPal integration *and* meaningful AI integration.** Stage-one judging is a pass/fail screen on exactly that. Never let either become a bolt-on.
 - **Submissions lock Nov 12, 2026, 12:00pm PT.** Public repo with an OSS licence file, run instructions *or* a hosted URL, and a **<3 min video**. `LICENSE` is already MIT and must never be removed.
 - **Kill switch: if the core PayPal integration is not demonstrably working end-to-end by Oct 20, drop it.** Do not spend Nov 1–12 polishing something that cannot make a real PayPal call.
-  - **Position Oct 17.** Read + capture are proven end to end. **Money-out is not**: no refund has
-    been issued, because no code can issue one. Treat "it acts" as **unproven until a real
-    `create_refund` lands** (S-4-live, `todo.md` P7-01). Do not describe the integration as working
-    end-to-end in the README, the run log, or the video until that call has succeeded.
+  - **Position Oct 17, evening: the kill switch cannot fire.** A **real refund executed end to end**
+    through the product path — full and partial, both `COMPLETED`, confirmed by an independent
+    `get_refund`. Evidence in `spike-result.md`. `cancel_subscription` is still untested because the
+    account has no subscriptions and PayPal cannot backdate one.
 - **Judges judge from the video.** It must stand alone. Never assume anyone opens the live demo.
 - **Scope is frozen.** Anything not on the `ARCHITECTURE.md` §12 build-order table is out. Explicit non-goals: native mobile, Expo/React Native, RevenueCat, OneSignal, custom domain, a free-roaming autonomous agent, unbounded spend, multi-tenant auth, an ORM/query builder.
 
@@ -46,9 +48,11 @@ Every PayPal MCP tool is **merchant-scoped**. `list_transactions` wraps Transact
   authored at seed time. **D1 is closed: "protect this merchant's revenue."** `README.md` has been
   corrected to that framing. Do not reintroduce consumer framing, and never write consumer-execution
   code.
-- **What the live sandbox has NOT proven:** money-out. No refund, no cancellation, no dispute
-  resolution has ever been executed. Refund + cancel carry the "it acts" claim and are S-4-live
-  (`todo.md` P7-01/P7-02). Reachability is not usability — the same mistake the dispute lane teaches.
+- **Money-out is proven (Oct 17 evening).** `McpPayPalExecutor` issued a real refund through the
+  real product path — full and partial, both `COMPLETED`, confirmed by `get_refund`. **What the live
+  sandbox has still NOT proven:** `cancel_subscription` (no subscriptions exist, and PayPal cannot
+  backdate one) and the dispute lane. Reachability is not usability — the dispute tools answer 200
+  from a merchant account and are still the buyer's.
 - **Sandbox tokens last 9 hours** (`expires_in=32400`, measured Oct 15). The 3–8h figure in the
   docs below was wrong. Refresh at ~7h.
 
@@ -61,8 +65,8 @@ Everything above the adapter layer depends on the `AccountSource` / `ActionExecu
 
 - Primary adapter is **in-process** MCP (`npx -y @paypal/mcp --tools=all`, `PAYPAL_ACCESS_TOKEN`, `PAYPAL_ENVIRONMENT=SANDBOX`). Hosted `mcp.paypal.com` OAuth is a stretch goal, not the primary path.
 - Sandbox tokens live **9 hours** (measured, `expires_in=32400`). Refresh proactively; never discover expiry mid-demo.
-- **What exists as of Oct 17:** `createCsvAccountSource` (real, tested, and the *only* adapter that names a payee — a consumer export does), plus the MCP plumbing underneath an adapter: `stdioClient`, `mcpEnvelope`, `tokenProvider`, `chunkRange`, `identityScan`, `inspect`, `orderPayload`, `orderStatus`, `seedMarker`, `freshness`.
-- **What does not exist:** `McpPayPalAdapter` itself, `RestPayPalAdapter`, and any `ActionExecutor`. `todo.md` P3-02 and P3-03 are open, and Phase 7 is the first time money leaves the account.
+- **What exists as of Oct 17:** `createCsvAccountSource` (real, tested, and the *only* adapter that names a payee — a consumer export does); `McpPayPalAdapter` and `McpPayPalExecutor` over the real `@paypal/mcp` stdio server; and the plumbing under them — `server.ts`, `stdioClient`, `mcpEnvelope`, `tokenProvider`, `chunkRange`, `identityScan`, `inspect`, `orderPayload`, `orderStatus`, `seedMarker`, `freshness`.
+- **What does not exist:** `RestPayPalAdapter`, `listSubscriptions` mapping (the adapter throws rather than return a plausible `[]`), the agent, the action layer, and any UI.
 - Dependencies point **downward only**: UI → run log → action layer → agent → core → adapters. The core imports nothing from layers above it.
 - Secrets (PayPal credentials, OpenRouter key) are **server-side only**. They never reach the browser.
 

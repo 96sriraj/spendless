@@ -284,38 +284,41 @@ is exactly the kind of protection that is useless if you don't know the name to 
 
 | Option | Status | Outcome |
 |---|---|---|
-| **A. Merchant-side PayPal** | ✅ **works — for read and capture** | Two live captures, real reads, real orders. **Refunds and cancellations are still unbuilt and untested.** |
+| **A. Merchant-side PayPal** | ✅ **works — read, capture, and now refund** | Two live captures, real reads, and a **real refund executed end to end on Oct 17**, full and partial. |
 | **B. CSV-only pivot** | **closed, not needed** | Remains as the fallback binding. Unchanged. |
 
 **What made it work**, in case it breaks again: a fresh **US** business account with a new app attached
 (fixes `UNSUPPORTED_PAYEE_CURRENCY`), and capturing **server-side** rather than relying on the hosted
 page to redirect back. The second is the durable one — it does not depend on the browser at all.
 
-> ### ⚠️ Correction, Oct 17 — this section previously overclaimed
+> ### ✅ Update, Oct 17 afternoon — the correction below is now resolved
 >
-> It read *"Refunds and cancellations execute against real sandbox objects."* **They have never been
-> executed.** There is no refund call anywhere in the repo: no
-> `POST /v2/payments/captures/{id}/refund`, no cancellation call, and `ActionExecutor` is an interface
-> in `src/adapters/AccountSource.ts` with **zero implementations**. The only money that has moved is
-> money *in*.
+> Earlier today this section said refunds had never been executed, and it was right to say so. An
+> hour later they had been:
 >
-> Nothing about money-out is uncertain — it is one POST against credentials that are live and
-> verified. It has simply not been written. That is `todo.md` P7-01/P7-02, and until one succeeds the
-> demo cannot claim "it acts", the README must not imply it, and the video must not show it.
+> - **Full refund** on capture `31F89528X81443109` → `status: COMPLETED`
+> - **Partial refund** on capture `6YN00176GH7185627` → refund `40551413F19556526`, `COMPLETED`
+> - Confirmed by an independent `get_refund` read
 >
-> **The kill-switch call still stands on the evidence that exists:** the integration is demonstrably
-> real, the account and app work, and money genuinely moves. What is missing is one endpoint, not the
-> integration. Worth knowing before anyone describes this as finished end-to-end.
+> It went through the **real product path** — our token, PayPal's MCP server over stdio, our
+> `McpPayPalExecutor` — not a raw `fetch`. Evidence in `spike-result.md`.
+>
+> **`cancel_subscription` is still untested**: the account has no subscriptions and PayPal cannot
+> create a backdated one, so there is nothing to cancel. Refund alone carries "it acts".
+>
+> ⚠️ **Both captures are now refunded.** Re-run `bun run seed` → approve in the browser →
+> `bun run capture --capture` for a fresh pair before the demo.
 
 > The lesson worth keeping, because it cost about a week: every one of the wrong diagnoses was made
 > from documentation, and every one of the right ones came from reading what the system actually
 > returned — the base64 `code=` in a URL, a raw API response, an order's own status. When something
 > disagrees with you, interrogate it rather than reason about it.
 >
-> **The correction above is that same lesson, applied one level up.** The overclaim was not a wrong
-> diagnosis from documentation — it was a *true* observation ("captures work") written as a *broader*
-> one ("actions work"). Reachability is not usability. The dispute lane taught it; the refund claim
-> then repeated it.
+> **The correction was that same lesson, applied one level up.** The original overclaim was not a
+> wrong diagnosis from documentation — it was a *true* observation ("captures work") written as a
+> *broader* one ("actions work"). Reachability is not usability. The dispute lane taught it; the
+> refund claim then repeated it. And the refund that eventually worked found **three more** defects
+> hiding behind a single `201`.
 
 ## Decisions needed from the founder
 

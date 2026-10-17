@@ -34,10 +34,11 @@
 > payments are captured server-side. The Spike is answered (see `spike-result.md` and
 > `ARCHITECTURE.md` §11c).
 >
-> **Phases 5–9 have not started, and they are the product.** No agent, no action layer, no approval
-> UI, no `ActionExecutor`, no UI, no deployment. The kill switch is Oct 20; the honest reading is
-> that the *read and capture* path is proven and **money-out is not**, because no code can issue a
-> refund yet. S-4-live is the most load-bearing question left and it is not a research question.
+> **Phases 5–9 have not started, and they are the product.** No agent, no approval UI, no UI, no
+> deployment. The kill switch is Oct 20 and **money-out is now proven** — a real refund executed
+> through `McpPayPalExecutor` on Oct 17, both full and partial, confirmed by an independent
+> `get_refund`. What is still missing is everything above the seam: the thing that decides *what* to
+> refund and asks a human first.
 >
 > Where the tree disagrees with this file, the tree wins. The boxes below were corrected against
 > artifacts on Oct 17 rather than left to imply work that did not happen.
@@ -95,17 +96,21 @@ allow-list is at `D:\Github\nixt\worker\src\index.ts:42-57` (**not yet ported �
 
 ## Phase 0 — The Spike (Oct 9–12) · **GO/NO-GO GATE** · **answered Oct 17**
 
-> **Status: the gate is closed — GO, on binding A.** The blocking H1 items cleared on Oct 16–17 and
-> `bun run spike` now reads real sandbox transactions. Evidence is in [`spike-result.md`](./spike-result.md)
-> (verdicts and field names only, no credentials) and `ARCHITECTURE.md` §11c.
+> **Status: the gate is closed — GO, on binding A — and S-4-live is now closed too.** The blocking
+> H1 items cleared on Oct 16–17, and on Oct 17 afternoon **a real refund went through the product
+> path**: full refund on `31F89528X81443109`, partial on `6YN00176GH7185627`
+> (`40551413F19556526`), both `COMPLETED`, confirmed by an independent `get_refund`.
 >
-> **Two of these remain open, and they are the two that matter for the demo:**
+> **"It acts" is no longer a claim, it is evidence** — and the kill switch cannot fire on money-out.
+> Evidence is in [`spike-result.md`](./spike-result.md) (verdicts, ids and field names only, no
+> credentials) and `ARCHITECTURE.md` §11c.
 >
-> - **S-4 (money-out) is untested.** No refund and no cancellation has ever been executed, because
->   `ActionExecutor` has no implementation. Reachability is not the same as a working action, and the
->   dispute lane is a live example of the difference — HTTP 200 on the buyer's namespace.
+> **Still open, and neither is on the critical path:**
+>
+> - **`cancel_subscription` is untested** — the account has no subscriptions and PayPal cannot
+>   create a backdated one, so there is nothing to cancel. Refund alone carries "it acts".
 > - **S-1 was never run against a personal account.** Binding B is confirmed *structurally*
->   (§11a), not empirically. That is enough to proceed and it is why nothing in the build depends on B.
+>   (§11a), not empirically. Enough to proceed, and nothing depends on the answer.
 
 - [ ] **S0-01** `[opencode.jsonc]` Enable the `paypal-local` MCP server (`disabled: false`) after `PAYPAL_ACCESS_TOKEN` is exported → expect `/mcps` shows it connected, not `needs authentication`
   - **Still open, and mechanically so:** `paypal-local` wants `PAYPAL_ACCESS_TOKEN` in the
@@ -126,11 +131,20 @@ allow-list is at `D:\Github\nixt\worker\src\index.ts:42-57` (**not yet ported �
     came from trusting the subject and a **measured** Transaction Search lag (`S-0-03b`) that made
     "not seeded" look like "broken".
 - [ ] **S3 (Spike)** **`@paypal/mcp --tools=all`** Call each tool once against the sandbox → **desk research answered this (46 tools, §11a); the live per-tool sweep never happened.** The two tools that carry "it acts" — refund and cancel — have never been called. Treat S3 as open for that reason, not for the other 44.
-- [ ] **S4 (Spike)** **`create_refund` on the S-2 capture · `cancel_subscription` on a live sub** → **OPEN, and the most load-bearing item in the repo.**
-  - Nothing about this is uncertain. A refund is one POST against credentials that are live and
-    verified. It has not been written, which is `todo.md` P7-01/P7-02, not a spike question.
-  - Until one succeeds, the demo cannot claim "it acts", and the README, run log and video must not
-    imply otherwise.
+- [x] **S4 (Spike)** **`create_refund` on the S-2 capture · `cancel_subscription` on a live sub** → **ANSWERED for refunds. This was the kill-switch question, and it is closed.**
+  - **Full refund:** capture `31F89528X81443109` → refund id returned, `status: COMPLETED`.
+  - **Partial refund:** capture `6YN00176GH7185627`, `{USD, 1.00}` → refund `40551413F19556526`, `COMPLETED`.
+  - An independent `get_refund` read agrees. Covered by
+    `test/integration/actionExecutor.live.test.ts`, which **skips loudly** rather than failing once
+    both captures are spent.
+  - **It went through the product path** — token → `@paypal/mcp` → `create_refund` — not a raw
+    `fetch`. A REST refund would have proved only that PayPal accepts refunds; what was unproven
+    was our half.
+  - **Three real defects were found on the way**, recorded in `spike-result.md`. The important one:
+    the MCP server reports HTTP failures as *successful* tool results, behind which a failed read
+    looked like an empty account and a failed cancellation looked like a success.
+  - **`cancel_subscription` remains untested** — no subscriptions exist and PayPal cannot create a
+    backdated one. Refund alone carries "it acts". P7-02.
 - [ ] **S0-04** `[PayPal sandbox]` Force a dispute, then exercise `/v1/customer/disputes/{id}/adjudicate` and `/require-evidence` → **half answered.** Merchant credentials reach the endpoint (**HTTP 200**), which refuted the prediction that they would be rejected. It is the **buyer's** namespace and does not list disputes *raised against* the merchant, so reachable ≠ usable.
   - **Recommended: cut it.** Refund + cancel carry "it acts" on their own, and `AGENTS.md` says cut
     rather than fake. Only revisit if the seed produces something worth disputing.
@@ -221,18 +235,26 @@ allow-list is at `D:\Github\nixt\worker\src\index.ts:42-57` (**not yet ported �
 > the plan schema is USD-only, and **the dispute tools are the buyer's, not the merchant's**.
 
 - [x] **P3-01** `[src/adapters/AccountSource.ts]` Define `AccountSource` + `ActionExecutor` exactly as ARCHITECTURE.md §3 specifies → **DONE**, with three corrections research forced in (§11a): `listTransactions` must **chunk**, since PayPal caps a window at 31 days and the MCP wrapper clamps silently; `RawTransaction` carries **`identitySource`** beside `merchantKey`, because no PayPal API returns a merchant name to anyone; and **`capabilities()`** is on the interface, so the dispute lane reports itself unavailable instead of 403-ing on camera.
-  - `ActionExecutor` is declared. **It has no implementation**, and until one does, no refund or
-    cancellation can be issued. That is P7, and it is why S-4-live is still open.
+  - `McpPayPalExecutor` implements it (Oct 17) and has issued a **real refund** against a sandbox
+    capture, confirmed by an independent `get_refund`. `cancelSubscription` is written and
+    unit-tested but has never run against a live subscription — none exists.
 - [ ] **P3-02** `[src/adapters/mcp/]` `McpPayPalAdapter` driving the **same stdio server** the `paypal-local` MCP entry runs → expect `listTransactions`, `listSubscriptions`, `listDisputes` returning real sandbox data
   - **Everything underneath it is built and tested:** `stdioClient` (real server, real dispatch),
     `mcpEnvelope` (cannot report success on a malformed reply), `tokenProvider`, `chunkRange`
     (the 31-day split), `identityScan` (scans every row, not just the first), `inspect`, `freshness`.
-  - **What is missing is the adapter that composes them.** Until it exists, the read path runs through
-    `scripts/spike.ts` rather than through `AccountSource` — which means nothing in `src/` consumes a
-    live transaction yet, and the e2e journey runs against fixtures.
-  - **Known lossiness, from reading the toolkit source:** no `fields=all` (so no `payer_info`), no
-    `transaction_type` (so no server-side recurring filter — do it client-side off
-    `transaction_event_code`), and the subscription-plan schema is **USD-only**. Chunking is mandatory.
+  - [x] **P3-02** `[src/adapters/mcp/]` `McpPayPalAdapter` driving the **same stdio server** the `paypal-local` MCP entry runs → **DONE (Oct 17),** with `McpPayPalExecutor` alongside it.
+  - `server.ts` mints the token and spawns the server (removing the client secret from the child's
+    environment); `McpPayPalAdapter` is the read side; `McpPayPalExecutor` is the money side.
+  - **Proven live**: handshake completes, 28 tools enumerated, `create_refund` and `get_refund`
+    called against real captures. See `spike-result.md`.
+  - **Three defects the live run exposed**, all fixed: the MCP server's second failure channel
+    (`{ok: false, status: 422}` inside a *successful* result), `create_refund` returning no amount
+    field, and `spawn npx.cmd` needing a shell on Windows.
+  - **`listSubscriptions` is not implemented yet** — Billing v1 → `RawSubscription` mapping. It
+    throws rather than returning a plausible `[]`.
+  - **Known lossiness:** no `fields=all` (no `payer_info`), no `transaction_type` (filter
+    client-side off `transaction_event_code`), USD-only plan schema, and **no refund amounts** in
+    the response. Chunking is mandatory and enforced.
 - [ ] **P3-03** `[src/adapters/rest/]` `RestPayPalAdapter` — the escape hatch for what the toolkit lacks → expect at least one method that the MCP path could not serve
   - **Deferred deliberately, and the deferral is now evidence-backed rather than assumed.** Everything
     the REST escape hatch was wanted for has been reached directly by a script: order create/capture,
@@ -314,12 +336,13 @@ allow-list is at `D:\Github\nixt\worker\src\index.ts:42-57` (**not yet ported �
 
 ## Phase 6 — Action layer + approval UI (Oct 19–20) · **kill-switch date** · **NOT STARTED**
 
-> **Nothing in this phase exists** — no `src/actions/`, no approval UI, no `ActionExecutor`
-> implementation. Every bullet below is a spec, not a description of code.
+> **The executor exists; the layer around it does not.** `McpPayPalExecutor` issued a real refund on
+> Oct 17, proven live. There is still no `src/actions/`, no proposal → approval → execution chain, and
+> no approval UI. Every bullet below is a spec, not a description of code.
 >
-> **P6-01 is what unblocks the kill switch.** `AGENTS.md`'s condition is the integration working
-> end-to-end, and read + capture is proven; **money-out is not**, because no code can issue a refund.
-> That is S-4-live, and P7-01 is the call. Do not record the kill switch as safe until it returns 201.
+> **The kill switch is settled — money-out works.** What Phase 6 adds is what makes it safe and what
+> a judge is actually watching: a human approves before money moves, and the refusal path is real
+> rather than decorative.
 
 - [ ] **P6-01** `[src/actions/]` `proposal → approval → execution → result`, **all four persisted** → expect a complete audit trail per action; nothing throwaway
 - [ ] **P6-02** `[ui]` Approval UI: a proposal cannot execute without explicit human approval → expect refunds are never autonomous
@@ -335,14 +358,19 @@ allow-list is at `D:\Github\nixt\worker\src\index.ts:42-57` (**not yet ported �
 
 ## Phase 7 — Execution (Oct 20–24) · **depends on S-4, P6** · **NOT STARTED**
 
-> **P7-01 is the single most valuable item in this file.** It is one POST against credentials that
-> are already verified working. It is also the only thing standing between this project and a
-> defensible "it acts". Everything else in Phases 6–8 is worth less until it returns 201.
+> **P7-01 is DONE and the kill switch is settled.** A real refund executed through the product path
+> on Oct 17 — see `spike-result.md`. What remains in this phase is everything above the seam: the
+> proposal → approval → execution chain that decides *whether* to refund, and the UI that shows it.
 
-- [ ] **P7-01** `[src/adapters/mcp/]` `refund` against a real sandbox capture → expect the refunded amount and `get_refund` to agree
-  - The captures to refund exist: `31F89528X81443109`, `6YN00176GH7185627`. **Nothing in this repo can
-    issue a refund yet** — `ActionExecutor` is an interface with no implementation. Test-first, like
-    everything else: the `ActionExecutor` contract test comes before the executor.
+- [x] **P7-01** `[src/adapters/mcp/]` `refund` against a real sandbox capture → expect the refunded amount and `get_refund` to agree → **DONE Oct 17.**
+  - Full refund on `31F89528X81443109` and partial on `6YN00176GH7185627` (`40551413F19556526`),
+    both `COMPLETED`, confirmed by an independent `get_refund` read.
+  - **One deviation, recorded because it was forced:** "the refunded amount and `get_refund` agree"
+    could not be asserted on a figure, because the MCP `create_refund` response carries **no
+    `amount` field**. The agreement is now asserted over "both report no amount" or "both report the
+    same amount", and `RefundResult.amountCents` is `number | null`.
+  - Regression net: `test/integration/actionExecutor.live.test.ts`. It **skips loudly** once both
+    captures are spent — re-run `bun run seed` → approve → `bun run capture --capture`.
 - [ ] **P7-02** `[src/adapters/mcp/]` `cancelSubscription` against a live subscription → expect the subscription to end, verified by `show_subscription_details`
 - [ ] **P7-03** `[src/adapters/mcp/]` `listDisputes` / `getDispute` / `acceptDisputeClaim` → expect a dispute resolved end to end in the scenario seeded in Phase 4
 - [ ] **P7-04** `[test/e2e]` Full action lifecycle against sandbox, **skipped unless `PAYPAL_ACCESS_TOKEN` is set** → expect green in sandbox, clean skip in CI
@@ -399,8 +427,8 @@ listed here because a test that is not run is not a gate — `bun run verify` ru
 ## What not to do
 
 - Do not start anything past Phase 0 with S-1..S-4 unanswered. **(Phase 0 closed Oct 17 — GO on
-  binding A. What remains unanswered is S-4-live, and it is answered by writing P7-01, not by
-  reading documentation.)**
+  binding A, and S-4-live answered by a real refund. `cancel_subscription` and S-1 remain open;
+  neither blocks the build.)**
 - Do not add a free-roaming agent, an ORM, multi-tenant auth, or a domain.
 - Do not put a secret in a committed file.
 - Do not let the LLM compute a money figure or choose a refund amount.
