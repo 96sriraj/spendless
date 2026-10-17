@@ -41,6 +41,7 @@ import type { ChatMessage, Completion, ToolCall, ToolSpec } from "./tools";
 import type { Recommendation } from "@/core/insights";
 import { getCancelGuide } from "@/core/cancelGuide";
 import { listSupportedMerchants } from "@/core/cancelGuide";
+import { scrubUrls } from "@/core/text";
 
 export type AgentDependencies = {
   /** What the detectors found. The agent may not reason about anything else. */
@@ -50,6 +51,17 @@ export type AgentDependencies = {
     tools?: readonly ToolSpec[];
   }) => Promise<Completion>;
   readonly maxTurns?: number;
+  /**
+   * Called with each transcript entry as it happens, so a screen can show the
+   * loop working instead of waiting out the model's latency in silence.
+   *
+   * Strictly an observer. Its errors are swallowed — a client disconnecting must
+   * not abort a run whose transcript is still being persisted — and nothing
+   * about the outcome may depend on whether anyone is listening, which is why
+   * `streaming.test.ts` asserts a watched run and an unwatched one are
+   * identical.
+   */
+  readonly onStep?: (entry: TranscriptEntry, seq: number) => void;
 };
 
 /**
@@ -160,6 +172,30 @@ export async function runAgent(deps: AgentDependencies): Promise<AgentRun> {
   const proposals: Proposal[] = [];
   const rejections: Rejection[] = [];
   const transcript: TranscriptEntry[] = [];
+
+  /**
+   * Every transcript write goes through here, not `transcript.push` directly.
+   *
+   * Centralised so a future step cannot silently skip the stream — and
+   * `streaming.test.ts` asserts the streamed count equals the transcript length,
+   * which is what actually catches the sixth call site nobody remembered.
+   *
+   * `seq` is 1-based and assigned from the array length after the push, so it is
+   * dense, monotonic, and identical to the position a reader would assign. The
+   * client re-sorts on it, because stream delivery order is not guaranteed.
+   */
+  const record = (entry: TranscriptEntry): void => {
+    transcript.push(entry);
+    if (deps.onStep === undefined) return;
+    try {
+      deps.onStep(entry, transcript.length);
+    } catch {
+      // Deliberate. The observer is a socket, and a socket that closed mid-run
+      // must not abort work whose transcript is still going to D1. Safe only
+      // because the run is persisted — see the note on `onStep`.
+    }
+  };
+
   let totalTokens: number | null = null;
   let turns = 0;
 
@@ -175,7 +211,7 @@ export async function runAgent(deps: AgentDependencies): Promise<AgentRun> {
     if (completion.usage.totalTokens !== null) {
       totalTokens = (totalTokens ?? 0) + completion.usage.totalTokens;
     }
-    transcript.push({
+    record({
       turn,
       kind: "llm_call",
       label: `turn ${turn}`,
@@ -189,7 +225,14 @@ export async function runAgent(deps: AgentDependencies): Promise<AgentRun> {
         turns,
         stoppedBecause: "answered",
         totalTokens,
-        finalText: completion.text,
+        // Scrubbed, and this is not a precaution. A live run on 2026-10-17
+        // produced "[Cancel your membership](https://help.netflix.com/en/node/435)"
+        // as its closing words and streamed it to the browser.
+        // `CancelGuidance` has a no-URL schema; free text never passes through it,
+        // so this is the same rule applied to the one string it was missing. The
+        // words survive — the merchant and the instruction are real; the link is
+        // invented, and it is the part that can 404.
+        finalText: scrubUrls(completion.text),
         transcript,
       });
     }
@@ -216,7 +259,7 @@ export async function runAgent(deps: AgentDependencies): Promise<AgentRun> {
         turn,
         onReject: (rejection) => {
           rejections.push(rejection);
-          transcript.push({
+          record({
             turn,
             kind: "rejected",
             label: `${call.name} refused`,
@@ -225,7 +268,7 @@ export async function runAgent(deps: AgentDependencies): Promise<AgentRun> {
         },
         onPropose: (proposal) => {
           proposals.push(proposal);
-          transcript.push({
+          record({
             turn,
             kind: "tool_result",
             label: `proposal ${proposal.subId}`,
@@ -254,7 +297,7 @@ export async function runAgent(deps: AgentDependencies): Promise<AgentRun> {
     detail: `Stopped after ${maxTurns} turns without a final answer. Proposals recorded: ${proposals.length}.`,
     turn: turns,
   });
-  transcript.push({
+  record({
     turn: turns,
     kind: "rejected",
     label: `turn cap reached after ${maxTurns} turns`,

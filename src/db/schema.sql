@@ -198,7 +198,7 @@ CREATE TABLE IF NOT EXISTS run_steps (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   run_id      TEXT NOT NULL,
   seq         INTEGER NOT NULL,
-  kind        TEXT NOT NULL CHECK (kind IN ('llm_call', 'tool_call', 'tool_result', 'note')),
+  kind        TEXT NOT NULL CHECK (kind IN ('llm_call', 'tool_call', 'tool_result', 'rejected', 'note')),
   label       TEXT NOT NULL,
   payload     TEXT,
   duration_ms INTEGER,

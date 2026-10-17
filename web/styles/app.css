@@ -170,3 +170,144 @@
     scroll-behavior: auto !important;
   }
 }
+/* ---- the run log ------------------------------------------------------ */
+
+/*
+ * Deliberately typographic rather than a card grid.
+ *
+ * The design gate flagged `few-pictures`: an interface fragment counts toward the
+ * floor, and the run log is the one piece of this screen that *is* the product's
+ * argument — a bounded tool loop, a closed allowlist, every refusal recorded.
+ * Rendering it as a terminal reads as evidence. Rendering it as three rounded
+ * cards reads as a dashboard, which is what it is not.
+ */
+.log {
+  display: grid;
+  gap: var(--gap);
+  border-top: 1px solid var(--surface-sunken);
+  padding-top: var(--gap);
+}
+
+.log__bar {
+  display: flex;
+  align-items: center;
+  gap: var(--gap);
+  flex-wrap: wrap;
+}
+
+.log__status {
+  font-size: var(--step-small);
+  color: var(--muted);
+  /* Tabular so the step count does not shift the layout as it climbs 1 -> 10. */
+  font-variant-numeric: tabular-nums;
+}
+
+.action {
+  font: inherit;
+  font-weight: 600;
+  color: var(--risk-ink);
+  background: var(--risk);
+  /* Squared, like everything else here. The house style has no radius and this
+     is not the place to reintroduce one. */
+  border: 0;
+  border-radius: var(--radius);
+  padding: 0.7em 1.4em;
+  cursor: pointer;
+  transition: transform var(--duration-fast) var(--ease-out),
+              opacity var(--duration-fast) linear;
+}
+
+.action:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.action:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.action:disabled {
+  opacity: 0.55;
+  cursor: progress;
+}
+
+/* Focus is not decorative: this button starts a run that spends a model call,
+   and it has to be reachable by keyboard without hunting for it. */
+.action:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 3px;
+}
+
+.log__steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 2px;
+  /* Mono so the sequence numbers align down the left edge and the log reads as
+     a record rather than as prose. */
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.8125rem;
+  line-height: 1.6;
+}
+
+.log__step {
+  display: grid;
+  grid-template-columns: 2.5rem 1fr;
+  gap: var(--gap-tight);
+  align-items: baseline;
+  color: var(--muted);
+  /* Each arriving row animates in. This is the motion that makes the run read as
+     happening rather than as a list that was already there. */
+  animation: log-in var(--duration) var(--ease-out) both;
+}
+
+.log__seq {
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.log__label {
+  color: var(--ink);
+}
+
+/* A refusal is tinted with the risk colour. It is the one line in the log that
+   says something went deliberately wrong, and it should not look like the
+   neighbouring rows. */
+.log__step[data-kind='rejected'] .log__label {
+  color: var(--risk);
+}
+
+@keyframes log-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.log__error {
+  margin: 0;
+  font-size: var(--step-small);
+  color: var(--risk);
+}
+
+.log__final {
+  margin: 0;
+  max-width: 60ch;
+  color: var(--muted);
+}
+
+/* Motion is decoration, and decoration is the first thing to go when someone has
+   asked their OS for less of it. */
+@media (prefers-reduced-motion: reduce) {
+  .log__step {
+    animation: none;
+  }
+  .action {
+    transition: none;
+  }
+}

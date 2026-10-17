@@ -20,6 +20,7 @@
 import { useEffect, useState } from "react";
 import { formatMinor } from "./format";
 import { heroFigure, type StateResponse } from "./hero";
+import { RunPanel } from "./RunPanel";
 import "./styles/tokens.css";
 import "./styles/base.css";
 import "./styles/app.css";
@@ -185,6 +186,8 @@ export default function App() {
             The agent proposes. You decide. Nothing moves without you.
           </p>
         </section>
+
+        <RunPanel />
       </main>
     </div>
   );

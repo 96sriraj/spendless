@@ -29,9 +29,17 @@
  */
 
 import { createDatabase } from "../src/db";
+import { createOpenRouterClient } from "../src/agent/tools";
+import type { ChatMessage, ToolSpec } from "../src/agent/tools";
 import { buildReadModel } from "../src/services/readModel";
+import { newRunId, streamAgentRun } from "../src/services/runStream";
 import { seedScenario } from "../src/services/scenario";
 import { ensureSchema } from "./schema";
+
+type AgentComplete = (request: {
+  messages: readonly ChatMessage[];
+  tools?: readonly ToolSpec[];
+}) => Promise<import("../src/agent/tools").Completion>;
 
 export type Env = {
   /** D1 binding. Absent when the account is not linked (H3 in human-todo.md). */
@@ -134,7 +142,106 @@ const routes: Record<string, Route> = {
       usage: seeded.usage,
     } });
   },
+
+  /**
+   * The agent run, streamed.
+   *
+   * POST, and a stream rather than a JSON body, because a run takes seconds and a
+   * spinner for eight seconds is indistinguishable from a hung request. Every
+   * step reaches the screen as it happens; `runStream.ts` owns the ordering and
+   * this route only frames.
+   *
+   * **A missing API key is a 503 with a sentence, not an empty stream.** A 200
+   * `text/event-stream` that emits nothing leaves the button spinning through a
+   * whole demo, and the presenter has no way to say what went wrong. This is the
+   * single most important behaviour on the route.
+   */
+  "POST /api/run": async (_request, env) => {
+    if (env.DB === undefined) return json({ error: "no database configured" }, 503);
+
+    const complete = resolveComplete(env);
+    if (complete === null) {
+      return json({ error: "OPENROUTER_API_KEY is not set, so the agent cannot run" }, 503);
+    }
+
+    const db = createDatabase(env.DB);
+    await ensureSchema(env.DB);
+    const { findings } = await buildReadModel(db, new Date());
+
+    const stream = streamAgentRun({
+      db,
+      runId: newRunId(new Date()),
+      findings,
+      complete,
+      now: new Date(),
+    });
+
+    // `ReadableStream` rather than a hand-rolled `TransformStream`: the Worker
+    // runtime has one, it takes a `Response` directly, and there is nothing here
+    // that needs the extra object.
+    const encoder = new TextEncoder();
+    const body = new ReadableStream<Uint8Array>({
+      async start(controller) {
+        try {
+          for await (const event of stream) {
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+          }
+        } catch (error: unknown) {
+          // Belt and braces: `streamAgentRun` already converts a failed run into
+          // an error event. This catches a failure in the framing itself, which
+          // would otherwise close the connection with no explanation on screen.
+          const message = error instanceof Error ? error.message : String(error);
+          controller.enqueue(
+            encoder.encode(`data: ${JSON.stringify({ type: "error", message })}\n\n`),
+          );
+        } finally {
+          controller.close();
+        }
+      },
+    });
+
+    return new Response(body, {
+      headers: {
+        "content-type": "text/event-stream; charset=utf-8",
+        "cache-control": "no-cache, no-transform",
+        // Nginx and friends will happily buffer a stream, which turns the whole
+        // feature into the spinner it was built to remove.
+        "x-accel-buffering": "no",
+      },
+    });
+  },
 };
+
+/**
+ * The model client, or null when one cannot be built.
+ *
+ * Null rather than a throwing client: "no key" is a configuration state the UI
+ * renders, not an exception, and it is the single most likely state on a demo
+ * machine that has not been set up.
+ */
+function resolveComplete(env: Env): AgentComplete | null {
+  const override = testComplete;
+  if (override !== undefined) return override;
+
+  const apiKey = env.OPENROUTER_API_KEY;
+  if (apiKey === undefined || apiKey.length === 0) return null;
+
+  return createOpenRouterClient({ apiKey }).complete;
+}
+
+/**
+ * Test seam.
+ *
+ * OpenRouter is external and unavailable in CI, and it sits behind the
+ * `AGENTS.md` §3 seam — so it is substituted here, explicitly and by hand, rather
+ * than by mocking a module. `null` means "no client at all", which is how the
+ * missing-key path is exercised without unsetting a real secret.
+ */
+let testComplete: AgentComplete | null | undefined;
+
+export function __setCompleteForTests(complete: AgentComplete | null): void {
+  testComplete = complete;
+}
 
 /**
  * What the client sees when there is nothing to compute from.

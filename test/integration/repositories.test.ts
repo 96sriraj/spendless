@@ -115,6 +115,47 @@ describe("run log", () => {
     db = freshDatabase();
   });
 
+  /**
+   * The kind the agent actually emits.
+   *
+   * `TranscriptEntry.kind` includes `"rejected"` and `RUN_STEP_KINDS` did not — so
+   * every refusal the agent produced would have failed to persist. That is the
+   * demo's central evidence ("the agent is constrained, and here is every time it
+   * said no"), and the run log was one enum short of being able to hold it.
+   *
+   * `note` is kept rather than replaced: the e2e journey seeds with one, and
+   * swapping a used kind for a new one is a different change from adding one.
+   */
+  it("should persist a rejection, because a refusal is the run's evidence", async () => {
+    await appendRunStep(db, {
+      runId: "run-rejected",
+      seq: 1,
+      kind: "rejected",
+      label: "delete_everything refused",
+      payload: { reason: "not on the allowlist" },
+    });
+
+    const steps = await readRunSteps(db, "run-rejected");
+    expect(steps).toHaveLength(1);
+    expect(steps[0]?.kind).toBe("rejected");
+  });
+
+  it("should still persist a note, because the journey seeds with one", async () => {
+    await appendRunStep(db, { runId: "run-note", seq: 1, kind: "note", label: "seed scenario" });
+    expect(await readRunSteps(db, "run-note")).toHaveLength(1);
+  });
+
+  it("should refuse a kind it does not recognise, rather than writing a row nothing can read", async () => {
+    await expect(
+      appendRunStep(db, {
+        runId: "run-bad",
+        seq: 1,
+        kind: "invented" as never,
+        label: "x",
+      }),
+    ).rejects.toThrow(/Unknown run step kind/);
+  });
+
   it("should hand out sequence numbers in order", async () => {
     expect(await nextSeq(db, "run-1")).toBe(1);
     await appendRunStep(db, { runId: "run-1", seq: 1, kind: "note", label: "a" });

@@ -12,7 +12,25 @@
 
 import type { Database } from "./index";
 
-export const RUN_STEP_KINDS = ["llm_call", "tool_call", "tool_result", "note"] as const;
+/**
+ * `rejected` is here because the agent emits it and nothing else does.
+ *
+ * `TranscriptEntry.kind` has carried `"rejected"` since the bounded loop was
+ * written, and this list did not — so every refusal the agent produced would have
+ * failed to persist, and the run log — the artefact the demo shows a judge as
+ * evidence that the agent is constrained — could not hold the evidence. Caught by
+ * the compiler when `runStream.ts` tried to write a transcript entry, which is the
+ * only reason it was caught before a recording rather than during one.
+ *
+ * `note` stays: the e2e journey seeds its run with one.
+ */
+export const RUN_STEP_KINDS = [
+  "llm_call",
+  "tool_call",
+  "tool_result",
+  "rejected",
+  "note",
+] as const;
 export type RunStepKind = (typeof RUN_STEP_KINDS)[number];
 
 export type RunStep = {
