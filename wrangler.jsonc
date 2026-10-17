@@ -30,10 +30,19 @@
     "run_worker_first": ["/api/*"]
   },
 
-  // D1. The database_id is deliberately absent — H3-03 in human-todo.md is
-  // still open, and a committed placeholder would be a fake. `wrangler d1
-  // create spendless` prints the id to paste here.
+  // D1. `database_id` is a placeholder because H3-03 in human-todo.md is still
+  // open, and a committed real id would be a lie about an account that does not
+  // exist yet.
   //
-  // "d1_databases" commented out rather than guessed: an empty binding id makes
-  // every request fail in a way that looks like a code bug.
+  // Wrangler creates the local instance on demand and never contacts Cloudflare
+  // with this value, so the entire read path is developable today. Deploying
+  // needs the real id from `wrangler d1 create spendless` pasted here - which
+  // is the last thing standing between this repo and a URL.
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "spendless",
+      "database_id": "local-placeholder"
+    }
+  ]
 }
