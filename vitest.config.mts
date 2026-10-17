@@ -33,6 +33,9 @@ export default defineConfig({
           name: "integration",
           include: ["test/integration/**/*.test.ts"],
           environment: "node",
+          // `bun run` loads `.env`; Node does not. Without this the live tests
+          // skip for the wrong reason - silently green while checking nothing.
+          setupFiles: ["test/support/loadEnv.ts"],
           testTimeout: 30_000,
         },
       },

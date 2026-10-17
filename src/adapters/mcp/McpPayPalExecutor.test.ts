@@ -90,6 +90,29 @@ describe("McpPayPalExecutor - refund", () => {
     expect(args[1]?.["amount"]).toBeDefined();
   });
 
+  it("reports no amount rather than zero when the binding does not send one", async () => {
+    // RED on a live result. Measured 2026-10-17: the MCP `create_refund` response
+    // is `{ id, status, links }` with **no `amount` field at all**, so a full
+    // refund has no amount to read and nothing to echo.
+    //
+    // Defaulting that to 0 is not a neutral fallback — `0` means "refunded
+    // nothing", so the run log would show a $0.00 refund next to a real
+    // capture that had just been reversed. The run log is the demo's evidence,
+    // so it must be able to say "this binding did not report it".
+    const { client } = recordingClient({
+      create_refund: { id: "1JU-NOAMOUNT", status: "COMPLETED", links: [] },
+    });
+
+    const result = await createMcpActionExecutor(client).refund({
+      captureId: CAPTURE,
+      currency: "USD",
+      note: "unused",
+    });
+
+    expect(result.status).toBe("completed");
+    expect(result.amountCents).toBeNull();
+  });
+
   it("reports a provider-reported failure as failed, never as completed", async () => {
     // `stdin` calls can come back HTTP 201 with status PENDING, or an error
     // body with a 200. Both are the provider refusing, and the run log is the

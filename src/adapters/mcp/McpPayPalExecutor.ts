@@ -103,11 +103,12 @@ export function createMcpActionExecutor(client: StdioMcpClient): ActionExecutor 
       const body = (await client.callTool("create_refund", args)) as Record<string, unknown>;
       const status = typeof body?.["status"] === "string" ? body["status"] : "";
 
-      // The caller's amount is authoritative for a full refund, because PayPal
-      // echoes the capture total rather than what we asked for. For a partial
-      // one the provider's figure is the one worth carrying.
+      // The caller's amount is authoritative for a partial refund, because they
+      // asked for it. For a full one the binding has to tell us — and the MCP
+      // `create_refund` response does not, so this is `null` rather than a
+      // figure we would be inventing. See `RefundResult.amountCents`.
       const echoed = readAmountCents(body?.["amount"]);
-      const amountCents = input.amountCents ?? echoed ?? 0;
+      const amountCents = input.amountCents ?? echoed ?? null;
 
       return {
         refundId: typeof body?.["id"] === "string" ? body["id"] : "",

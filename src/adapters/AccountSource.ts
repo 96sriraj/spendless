@@ -230,7 +230,19 @@ export type RefundInput = {
 export type RefundResult = {
   readonly refundId: string;
   readonly status: "pending" | "completed" | "failed";
-  readonly amountCents: number;
+  /**
+   * What was refunded, or `null` when the binding did not report it.
+   *
+   * Nullable because that is a real case, not a theoretical one: measured
+   * 2026-10-17, the MCP `create_refund` response carries `{ id, status, links }`
+   * and **no `amount` field**, so a full refund has nothing to echo. A partial
+   * refund is known, because the caller asked for it.
+   *
+   * `0` is not an acceptable substitute. It reads as "refunded nothing", which
+   * would put a $0.00 refund in the run log beside a capture that had just been
+   * reversed — and the run log is the demo's evidence.
+   */
+  readonly amountCents: number | null;
   readonly currency: Currency;
   readonly raw: unknown;
 };

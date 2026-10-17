@@ -79,6 +79,62 @@ describe("readMcpToolResult", () => {
     );
   });
 
+  it("should surface an API-level failure the server reports as a successful call", () => {
+    // RED on a live result, 2026-10-17. PayPal's server does not use the MCP
+    // `isError` channel for HTTP failures. It returns the error *inside* a
+    // normal, successful tool result:
+    //
+    //   { ok: false, status: 422, code: "PAYPAL_API_HTTP_ERROR",
+    //     message: "The capture has already been fully refunded" }
+    //
+    // This is the second, quieter failure channel, and it is the dangerous
+    // shape — valid JSON that looks exactly like data. Left alone it produced
+    // two real bugs: a failed `list_transactions` read as **zero
+    // transactions** (an empty account, indistinguishable from a fresh sandbox),
+    // and a failed `cancel_subscription` read as **succeeded**, because "we got
+    // here" was the success test.
+    const failure = {
+      ok: false,
+      status: 422,
+      code: "PAYPAL_API_HTTP_ERROR",
+      message:
+        "The requested action could not be performed, semantically incorrect, or " +
+        "failed business validation.: The capture has already been fully refunded",
+    };
+
+    expect(() => readMcpToolResult(envelope(failure), "create_refund")).toThrow(
+      /already been fully refunded/i,
+    );
+  });
+
+  it("should name the tool that failed, so a silent refund cannot masquerade", () => {
+    const failure = { ok: false, status: 403, message: "PERMISSION_DENIED" };
+    expect(() => readMcpToolResult(envelope(failure), "cancel_subscription")).toThrow(
+      /cancel_subscription/,
+    );
+  });
+
+  it("should keep an explicit ok:true result as data", () => {
+    // The counterpart to the test above, and the reason the check is `ok === false`
+    // rather than "does this object have a `message`". A PayPal payload can carry
+    // a message field of its own without being an error.
+    const body = { ok: true, id: "1JU", status: "COMPLETED" };
+    expect(readMcpToolResult(envelope(body))).toEqual(body);
+  });
+
+  it("should not mistake a PayPal payload's own fields for an error envelope", () => {
+    // `status` and `message` both appear in legitimate PayPal objects. Only the
+    // explicit `ok: false` marks the wrapper, so a refund object carrying
+    // `status: "COMPLETED"` is never read as a failure.
+    const refund = {
+      id: "1JU",
+      status: "COMPLETED",
+      amount: { currency_code: "USD", value: "15.99" },
+      message: "Refund completed",
+    };
+    expect(readMcpToolResult(envelope(refund))).toEqual(refund);
+  });
+
   it("should reject a result that is not an MCP envelope at all", () => {
     expect(() => readMcpToolResult(null)).toThrow();
     expect(() => readMcpToolResult({ nope: true })).toThrow(/content/i);

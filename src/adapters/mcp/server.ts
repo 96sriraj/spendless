@@ -99,10 +99,28 @@ function childEnvironment(token: string, environment: string): Record<string, st
   };
 }
 
+/**
+ * Whether spawning needs a shell, decided per platform.
+ *
+ * Windows is the only platform that needs one, and only because Node refuses to
+ * spawn a `.cmd` without a shell since the CVE-2024-27980 fix. The only `npx`
+ * on disk there is `npx.cmd`, so without this the connection fails with
+ * `EINVAL` before any token is spent — which is exactly how it failed.
+ *
+ * Not a style preference on the other platforms: a shell reinterprets the
+ * argument list, so requesting one where it is unnecessary widens what has to
+ * be quoted for no benefit. The arguments here are a constant, never user
+ * input, which is what makes opting in on Windows safe.
+ */
+export function spawnOptionsForPlatform(platform: string): { shell: boolean } {
+  return { shell: platform === "win32" };
+}
+
 const defaultSpawn: SpawnFn = (command, args, env) =>
   spawnProcess(command, [...args], {
     env,
     stdio: ["pipe", "pipe", "pipe"],
+    ...spawnOptionsForPlatform(process.platform),
   }) as ChildProcessWithoutNullStreams;
 
 export async function connectPayPalMcp(options: ConnectOptions): Promise<PayPalMcpConnection> {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { connectPayPalMcp, type SpawnFn } from "./server";
+import { connectPayPalMcp, spawnOptionsForPlatform, type SpawnFn } from "./server";
 import type { TokenProvider } from "../tokenProvider";
 
 /**
@@ -217,5 +217,26 @@ describe("connectPayPalMcp - lifecycle", () => {
     const fake = fakeSpawn();
     const { client } = await connected(fake);
     expect(client.serverInfo.name).toBe("fake");
+  });
+});
+
+describe("spawnOptionsForPlatform", () => {
+  // RED on a real failure. Node refuses to spawn a `.cmd` without a shell
+  // since the CVE-2024-27980 fix, and on Windows the only `npx` on disk is
+  // `npx.cmd` — so the first live run of the refund probe died with
+  // `spawn npx.cmd EINVAL` before a single token was spent.
+  //
+  // It is worth a test of its own because it is invisible everywhere else: the
+  // injected-spawn tests never touch the default, and the failure only appears
+  // on Windows, on the first real call.
+  it("needs a shell on Windows, where npx is npx.cmd", () => {
+    expect(spawnOptionsForPlatform("win32")).toEqual({ shell: true });
+  });
+
+  it("does not need a shell anywhere else", () => {
+    // Not a style preference: a shell reinterprets the argument list, so adding
+    // one where it is not needed widens what has to be quoted for no reason.
+    expect(spawnOptionsForPlatform("linux")).toEqual({ shell: false });
+    expect(spawnOptionsForPlatform("darwin")).toEqual({ shell: false });
   });
 });

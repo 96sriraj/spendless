@@ -14,6 +14,13 @@
  * reason the caller cannot see. "We could not read it" and "there was nothing
  * there" are different facts, and only one of them is safe to render.
  *
+ * There are **two** ways for this server to report a failure, and only one of
+ * them is the obvious one. `isError: true` is the MCP-standard channel. The
+ * other is an ordinary successful result carrying `{ ok: false, status, code,
+ * message }` — PayPal's wrapper around its own HTTP failures. Both are handled
+ * here, because a caller that reads neither will confidently proceed on an
+ * error object.
+ *
  * Pure: no transport, no spawning, no credentials. The stdio client is a
  * separate concern, and keeping this separable is what lets it be tested at all
  * without a sandbox.
@@ -95,6 +102,27 @@ export function readMcpToolResult(result: unknown, tool?: string): unknown {
   if (parsed === FAILED) {
     throw new McpToolError(`MCP text block was not JSON: ${truncate(text)}`, tool);
   }
+
+  // The second failure channel, and the dangerous one.
+  //
+  // PayPal's server does not use `isError` for HTTP failures. It returns the
+  // error inside an ordinary successful result:
+  //
+  //   { ok: false, status: 422, code: "PAYPAL_API_HTTP_ERROR", message: "..." }
+  //
+  // Measured live 2026-10-17. Left unhandled it caused two real defects: a
+  // failed `list_transactions` became an **empty account** — indistinguishable
+  // from a fresh sandbox, which is precisely the confusion this module exists
+  // to prevent — and a failed `cancel_subscription` became **succeeded**,
+  // because the success test was "we got here".
+  //
+  // Keyed on an explicit `ok === false` rather than on the presence of
+  // `status` or `message`, because legitimate PayPal objects carry both: a
+  // refund reads `{ status: "COMPLETED", message: ... }` and must stay data.
+  if (isRecord(parsed) && parsed["ok"] === false) {
+    throw new McpToolError(describeErrorBody(parsed), tool);
+  }
+
   return parsed;
 }
 
