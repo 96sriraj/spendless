@@ -18,30 +18,29 @@
 
 | Window | Human (this file) | Agent (`todo.md`) | Joint gate |
 |---|---|---|---|
-| **Oct 9–12** | 🔴 H1 (PayPal accounts + token) · H2 (LLM key) | **Phase 0 Spike S-1..S-5** | **GO/NO-GO** |
-| Oct 13–19 | H3 (Cloudflare account) available early | Phases 1–5 (core → adapter → seed → run log → agent) | Core agent works end-to-end locally |
-| **Oct 20** | 🔴 **Kill-switch check** | Phases 6–7 (action layer → execution) | **Real PayPal call, or drop it** |
-| Oct 20–26 | H4 (repo public) · decisions | Phase 7–8 (UI surface, deploy) | Demo runs on a free subdomain |
-
-> ## ⚠️ Oct 16 — schedule slip, stated plainly
->
-> **The kill switch is Oct 20. Four days out.**
->
-> H1-01 and H1-02 landed on Oct 16, late. Phases 1–2 are complete and green (357 tests), and the
-> adapter ports plus the CSV adapter are done, so the work is staged and waiting on one token —
-> but **no real PayPal call has been made yet**, and the kill-switch condition is precisely "a
-> real PayPal call works end to end".
->
-> **The next four hours matter more than the next four days.** `bun run spike` takes minutes once
-> `PAYPAL_ACCESS_TOKEN` is set, and it answers the questions that decide whether the rest of the
-> plan survives: whether the sandbox reads transactions at all, whether merchant-authored identity
-> round-trips, and whether the dispute lane exists.
->
-> If Oct 17 passes with no token, the honest move is to **move the kill switch** and re-plan against
-> the CSV-only path, which is fully built and needs no PayPal credential at all.
+| **Oct 9–12** | 🔴 H1 (PayPal accounts + token) · H2 (LLM key) | **Phase 0 Spike** | ✅ **GATE PASSED Oct 17** — GO on binding A |
+| Oct 13–19 | ✅ H1 done · ✅ H2 done · H3 (Cloudflare account) available early | Phases 1–4 done or partly done · **Phase 5 (the agent) not started** | ⬜ Core agent works end-to-end locally |
+| **Oct 20** | 🔴 **Kill-switch check** | Phase 6 (action layer) | ⚠️ **Money-out still unproven — see below** |
+| Oct 20–26 | H4 (repo public) ✅ · decisions | Phase 7 (execution) · Phase 8 (UI, deploy) | Demo runs on a free subdomain |
 | Oct 27–Nov 2 | H5 (Cloudflare deploy) · full rehearsal | Phase 8 (deploy + harden) | Deployed, rehearsable, no cold-start breakage |
 | Nov 3–8 | 🔴 H6 (record the video) · H7 (Devpost text) | Phase 9 (submission support) | Video <3 min, submission drafted |
 | Nov 9–11 | 🔴 **Submit early** | Bugfix only | Devpost locks Nov 12 |
+
+> ## ⚠️ Oct 17 — the schedule warning from Oct 16 is resolved, but not the way it was hoped
+>
+> **What the warning said:** if Oct 17 passed with no token, move the kill switch and re-plan against
+> the CSV-only path. **The token arrived**, `bun run check-env` passes for both credentials, and the
+> merchant-side path is confirmed. No pivot is needed.
+>
+> **What the warning got right, and why it still matters:** the slip was real, and Phases 5–9 have
+> not moved. Phases 1–2 finished on Oct 9 and then the agent lane sat idle for a week waiting on a
+> credential. Phases 5–7 are still untouched.
+>
+> **The part nobody had checked when the warning was written:** read and capture working end-to-end is
+> **not** the same as "it acts". No refund has been issued, because no code can issue one. The kill
+> switch in `AGENTS.md` is not formally triggered — the integration is demonstrably real — but
+> `todo.md` P7-01 is now the highest-value hour of work available, and until it returns 201 the demo
+> cannot claim it acts.
 
 ---
 
@@ -65,24 +64,29 @@
 
 ### 🔴 What genuinely blocks the agent lane
 
-| # | Item | Why it blocks |
-|---|---|---|
-| 1 | **H1-07** One-line demo persona | Decides what the README says. 2 minutes of thought. |
-| 2 | **H2-02** Pick the OpenRouter model | 1-minute shortlist. `AGENTS.md`: a small model with a tight schema beats a large one wandering — so this is a real choice, not a default. |
+**Nothing, as of Oct 17.** This table previously listed H1-07 and H2-02 as open; both were closed the
+same day and this section was not updated. Every 🔴 blocker in the H1/H2 lanes is now cleared.
 
-**H2-01 is done.** Put the key in `.env` as `OPENROUTER_API_KEY`. See `.env.example`, which was written
-today because there was no committed list of what a fresh shell needs — `.gitignore` protected `.env`
-perfectly well, which is exactly the kind of protection that is useless if you don't know the name to
-use.
+| # | Item | Status |
+|---|---|---|
+| ~~H1-07~~ | One-line demo persona | ✅ **Closed** — "protect this merchant's revenue" (D1). `README.md` now says it. |
+| ~~H2-02~~ | Pick the OpenRouter model | ✅ **Closed** — `meta-llama/llama-3.1-8b-instruct` (D2), verified against the live catalogue. |
+
+**H2-01 is done**, and the key is confirmed working — `bun run check-env` gets a real completion. See
+`.env.example` for the names a fresh shell needs; `.gitignore` protected `.env` perfectly well, which
+is exactly the kind of protection that is useless if you don't know the name to use.
+
+> **The agent lane's blocker is now the agent lane's own work.** Phases 5–7 are untouched: no agent,
+> no action layer, no `ActionExecutor`, no refund. That is `todo.md` P5-01 onward, and it is not
+> waiting on anyone in this file.
 
 ### 🟢 Nice to have, not blocking
 
-- **Re-run `bun run seed`** — the two existing captures predate the marker fix, so they read as
-  unidentified. New seeds carry `spendless:` and give you a third merchant. Do it whenever; nothing
-  waits on it.
 - **H3-01..04** Cloudflare account + D1 — blocks *deployment*, not building. Worth doing early anyway
-  since account creation sometimes needs email verification.
-- **H1-06** dispute — contingent, and `AGENTS.md` says cut it rather than fake it.
+  since account creation sometimes needs email verification. **This is the only lane with open 🔴 work left.**
+- **H1-06** dispute — **recommend cutting it.** The live probe returned 200 but the namespace is the
+  buyer's, so it is not shown to list disputes against the merchant. `AGENTS.md` says cut it rather
+  than fake it. Refund + cancel carry "it acts" on their own.
 - **H5** rehearsal · **H6** video · **H7** Devpost — the endgame.
 
 ---
@@ -280,17 +284,38 @@ use.
 
 | Option | Status | Outcome |
 |---|---|---|
-| **A. Merchant-side PayPal** | ✅ **works** | Two live captures. Refunds and cancellations execute against real sandbox objects. |
+| **A. Merchant-side PayPal** | ✅ **works — for read and capture** | Two live captures, real reads, real orders. **Refunds and cancellations are still unbuilt and untested.** |
 | **B. CSV-only pivot** | **closed, not needed** | Remains as the fallback binding. Unchanged. |
 
 **What made it work**, in case it breaks again: a fresh **US** business account with a new app attached
 (fixes `UNSUPPORTED_PAYEE_CURRENCY`), and capturing **server-side** rather than relying on the hosted
 page to redirect back. The second is the durable one — it does not depend on the browser at all.
 
+> ### ⚠️ Correction, Oct 17 — this section previously overclaimed
+>
+> It read *"Refunds and cancellations execute against real sandbox objects."* **They have never been
+> executed.** There is no refund call anywhere in the repo: no
+> `POST /v2/payments/captures/{id}/refund`, no cancellation call, and `ActionExecutor` is an interface
+> in `src/adapters/AccountSource.ts` with **zero implementations**. The only money that has moved is
+> money *in*.
+>
+> Nothing about money-out is uncertain — it is one POST against credentials that are live and
+> verified. It has simply not been written. That is `todo.md` P7-01/P7-02, and until one succeeds the
+> demo cannot claim "it acts", the README must not imply it, and the video must not show it.
+>
+> **The kill-switch call still stands on the evidence that exists:** the integration is demonstrably
+> real, the account and app work, and money genuinely moves. What is missing is one endpoint, not the
+> integration. Worth knowing before anyone describes this as finished end-to-end.
+
 > The lesson worth keeping, because it cost about a week: every one of the wrong diagnoses was made
 > from documentation, and every one of the right ones came from reading what the system actually
 > returned — the base64 `code=` in a URL, a raw API response, an order's own status. When something
 > disagrees with you, interrogate it rather than reason about it.
+>
+> **The correction above is that same lesson, applied one level up.** The overclaim was not a wrong
+> diagnosis from documentation — it was a *true* observation ("captures work") written as a *broader*
+> one ("actions work"). Reachability is not usability. The dispute lane taught it; the refund claim
+> then repeated it.
 
 ## Decisions needed from the founder
 
@@ -310,9 +335,11 @@ subscriptions that are failing, disputed, or unused — and acting on them.*
 Chosen over *"here's what your data shows you"* because it is the stronger PayPal story **and** the
 more honest one. Three reasons, in order of how much they matter:
 
-1. **It is literally true of our data.** The detectors key on identity spendless itself wrote into
-   `invoice_id`/`custom_id`/`transaction_subject` at seed time. So the subject is *our merchant's own
-   plans and subscribers* — not a consumer's spending, which no PayPal API exposes.
+1. **It is literally true of our data.** The detectors key on identity spendless itself wrote at seed
+   time. ⚠️ **Corrected Oct 17:** that identity survives only in `transaction_subject` — `invoice_id`
+   and `custom_field` come back from the API but do not carry our value. The subject of the demo is
+   still *our merchant's own plans and subscribers* — not a consumer's spending, which no PayPal API
+   exposes — but the field list was wrong.
 2. **It puts the "it acts" claim where it belongs.** Refund, cancel and dispute are all merchant-side
    actions. A consumer narrative would have to explain why the actions happen on the merchant's
    account anyway, which is the contradiction AGENTS.md flags.
