@@ -70,7 +70,7 @@ same day and this section was not updated. Every 🔴 blocker in the H1/H2 lanes
 | # | Item | Status |
 |---|---|---|
 | ~~H1-07~~ | One-line demo persona | ✅ **Closed** — "protect this merchant's revenue" (D1). `README.md` now says it. |
-| ~~H2-02~~ | Pick the OpenRouter model | ✅ **Closed** — `meta-llama/llama-3.1-8b-instruct` (D2), verified against the live catalogue. |
+| ~~H2-02~~ | Pick the OpenRouter model | ✅ **Closed** — `mistralai/mistral-small-3.2-24b-instruct` (D2, revised after a live test). |
 
 **H2-01 is done**, and the key is confirmed working — `bun run check-env` gets a real completion. See
 `.env.example` for the names a fresh shell needs; `.gitignore` protected `.env` perfectly well, which
@@ -210,7 +210,7 @@ is exactly the kind of protection that is useless if you don't know the name to 
 
 - [x] **H2-01** `[openrouter.ai] Create an account and generate an API key** → expect a key that works at free-tier demo volume
   - Agent reads it server-side only (P8-02). **It never reaches the browser.**
-- [x] **H2-02** `[DONE 2026-10-17]` **Pick a cheap instruct model** → **`meta-llama/llama-3.1-8b-instruct`**
+- [x] **H2-02** `[DONE 2026-10-17, revised]` **Pick a cheap instruct model** → **`mistralai/mistral-small-3.2-24b-instruct`** — the 8B pick was cheaper and could not emit valid tool arguments
   - Verified against `/api/v1/models`: $0.05/M in, $0.08/M out, 131k ctx. ~$0.001 per demo run.
   - Upgrade to `mistralai/mistral-small-3.2-24b-instruct` only if proposals come back weak.
   - ⚠️ `qwen/qwen3-8b` — the plausible-looking default — **does not exist** in the catalogue. Guessed
@@ -325,7 +325,7 @@ page to redirect back. The second is the durable one — it does not depend on t
 | # | Decision | Status | Needed by |
 |---|---|---|---|
 | **D1** | Demo persona framing | ✅ **CLOSED Oct 17 — "protect this merchant's revenue"** | — |
-| **D2** | OpenRouter model | ✅ **CLOSED Oct 17 — `meta-llama/llama-3.1-8b-instruct`** | — |
+| **D2** | OpenRouter model | ✅ **CLOSED Oct 17 — revised to `mistralai/mistral-small-3.2-24b-instruct`** | — |
 | D3 | Hold the `*.workers.dev` subdomain or buy a domain | ☐ open | Nov 2 — **default: hold, do not buy** |
 | D4 | Pull the trigger if the Oct 20 kill switch fires | ✅ **closed — kill switch did not fire** | — |
 | **D5** | **How to demo recurrence, given live sandbox cannot produce it** | ✅ **CLOSED — founder chose BOTH (Oct 17)** | — |
@@ -355,21 +355,36 @@ spending" has failed its own first sentence.
 
 ### D2 — the OpenRouter model
 
-**Default: `meta-llama/llama-3.1-8b-instruct`.** Verified against `/api/v1/models` on 2026-10-17:
-$0.05/M in, $0.08/M out, 131k context.
+**Decided: `mistralai/mistral-small-3.2-24b-instruct`. REVISED 2026-10-17 after a live test.**
 
-Chosen because `AGENTS.md`'s reasoning holds: *a small model with a tight schema beats a large one
-wandering*. The agent classifies, ranks and drafts rationale — it never computes a figure or moves
-money — so it is not the quality bottleneck. Roughly $0.001 per demo run.
+The original pick was `meta-llama/llama-3.1-8b-instruct` at $0.05/M in, $0.08/M out. It is
+**cheaper and unusable.** On OpenRouter it emits every tool call's arguments twice, concatenated:
 
-**Upgrade path if proposals come back weak:** `mistralai/mistral-small-3.2-24b-instruct`
-($0.09/M in, $0.25/M out, 256k ctx). Same reasoning applies to both; the 24B is a strictly better
-reasoner for ~2x the price, which is still negligible at demo volume.
+```
+{"limit": "50"}{"limit": "50"}
+```
 
-> Worth recording that a plausible-sounding default — `qwen/qwen3-8b` — **does not exist** in the
-> catalogue. The ID was guessed from memory and would have failed on first use. Verified against the
-> live endpoint instead. Same lesson as the PayPal Spike: interrogate the system, do not reason about
-> it from memory.
+That is not valid JSON, so the agent refused every call. Measured over six consecutive turns:
+**zero proposals, and zero convergence** — told its arguments were malformed, it produced the
+identical doubled form again.
+
+`mistralai/mistral-small-3.2-24b-instruct` on the identical prompt: **one proposal, zero
+rejections, answered in three turns.**
+
+**Nothing for you to do.** The swap is already in the code and the price difference is about
+$0.0007 per demo run. It is recorded here because the catalogue check that verified the original
+pick was *not enough*: the ID existed, the key worked, and the model still could not call a tool.
+
+> Worth keeping from the same day: `qwen/qwen3-8b`, the other plausible-looking default, **does not
+> exist** in the catalogue. It was guessed from memory. Existence in the catalogue says nothing
+> about whether a model can emit valid arguments — only a run does.
+
+To try a candidate later, with no code edit:
+
+```powershell
+$env:OPENROUTER_MODEL = "some/other-model"
+bun run test:integration
+```
 
 ### D5 — recurrence demo: both lanes, clearly labelled
 

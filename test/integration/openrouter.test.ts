@@ -222,7 +222,7 @@ describe("createOpenRouterClient — failing loudly", () => {
     );
   });
 
-  it("surfaces unparseable arguments as an error rather than an empty object", async () => {
+  it("reports unparseable arguments as unusable rather than as an empty object", async () => {
     respond = () => ({ status: 200, headers: {} });
     body_of = () => ({
       choices: [
@@ -239,10 +239,42 @@ describe("createOpenRouterClient — failing loudly", () => {
       ],
     });
 
-    // `{}` would be indistinguishable from the model calling the tool with no
-    // arguments, and the loop would happily run it on invented input.
-    await expect(client().complete({ messages: [{ role: "user", content: "hi" }] })).rejects.toThrow(
-      /arguments/i,
-    );
+    const result = await client().complete({ messages: [{ role: "user", content: "hi" }] });
+    const call = result.toolCalls[0];
+
+    // Not a throw. `{}` would be indistinguishable from "called with no
+    // arguments" and the loop would run the tool on invented input; throwing
+    // would kill the run over one bad turn. The loop rejects and records it
+    // instead, which is the same path every other bad call takes.
+    expect(call?.args).toEqual({});
+    expect(call?.argsError).toMatch(/not valid JSON/i);
+  });
+
+  it("tolerates the doubled-object artefact the small model actually produces", async () => {
+    // Measured live 2026-10-17 against `meta-llama/llama-3.1-8b-instruct`: it
+    // emitted `{"limit":"50"}{"limit":"50"}` — the same JSON object twice, which
+    // is not valid JSON. Recorded as a bad call, not fatal.
+    respond = () => ({ status: 200, headers: {} });
+    body_of = () => ({
+      choices: [
+        {
+          message: {
+            role: "assistant",
+            content: null,
+            tool_calls: [
+              {
+                id: "c1",
+                type: "function",
+                function: { name: "list_findings", arguments: '{"limit":"50"}{"limit":"50"}' },
+              },
+            ],
+          },
+          finish_reason: "tool_calls",
+        },
+      ],
+    });
+
+    const result = await client().complete({ messages: [{ role: "user", content: "hi" }] });
+    expect(result.toolCalls[0]?.argsError).toMatch(/not valid JSON/i);
   });
 });

@@ -80,6 +80,7 @@ const call = (name: string, args: unknown, id = "c1") => ({
   id,
   name,
   args: args as Record<string, unknown>,
+  argsError: null,
 });
 
 describe("ProposalSchema", () => {

@@ -3,18 +3,20 @@
 **The AI agent that spends less, not more.** PayPal AI Hackathon entry (Devpost: [Build What's Next with PayPal and AI](https://paypalaihackathon.devpost.com)).
 
 > **Snapshot 2026-10-17.** Phases 1–2 are **done and green** (`bun run verify` = typecheck +
-> 512 tests). The PayPal sandbox account, app and credentials are **live**. Money has moved **both
+> 573 tests). The PayPal sandbox account, app and credentials are **live**. Money has moved **both
 > ways**: two orders captured, and a real refund issued end to end through the product path. Both
 > credentials pass `bun run check-env`.
 > Read `README.md` (scope + business case) and `ARCHITECTURE.md` (how it gets built, in what
 > order) before writing code. Both are the source of truth — this file only records what an agent
 > would otherwise get wrong.
 >
-> **What is NOT built yet, and it is most of the product:** the agent (Phase 5), the action layer's
-> `proposal → approval → execution` chain and its approval UI (Phase 6), and any UI or deployment
-> (Phases 4, 8). `McpPayPalExecutor` can issue a refund and does, but **nothing above it decides
-> whether to** — there is no approval step and no guardrail. Do not describe the demo as having a
-> safety model until Phase 6 exists.
+> **Phase 5 (the agent) is DONE.** `src/agent/` runs a bounded loop over a three-tool allowlist
+> with no execution capability, and it has produced valid proposals against the live model.
+>
+> **What is NOT built yet:** the action layer's `proposal → approval → execution` chain and its
+> approval UI (Phase 6), and any UI or deployment (Phases 4, 8). `McpPayPalExecutor` can issue a
+> refund and does, but **nothing above it decides whether to** — there is no approval step and no
+> guardrail. Do not describe the demo as having a safety model until Phase 6 exists.
 >
 > **Work the queues:** [`todo.md`](./todo.md) is the agent lane, [`human-todo.md`](./human-todo.md)
 > is the founder lane. The agent lane blocks on anything marked 🔴 there (PayPal business account,
@@ -101,12 +103,36 @@ Also carried over: raw SQL + zod (no ORM, deliberate), and the reusable CORS all
 
 **Bounded loop with a typed tool allowlist** — not a free-roaming agent. Reproducible demo, no hallucinated refunds.
 
+> **Built, 2026-10-17.** `src/agent/` — `tools.ts` (OpenRouter edge), `agent.ts` (the loop),
+> `proposal.ts` (the schemas), `cancelResolution.ts` (P5-04). No `src/agent/index.ts` yet; import
+> the modules directly.
+
 - The LLM **classifies, reasons, ranks, and drafts rationale**. It does **not** compute a normalised monthly figure, decide a refund amount, or execute anything. Every figure on screen traces to a pure function in the core.
+- **The no-money rule is a schema, not a prompt.** `ProposalSchema` is `.strict()`, so a proposal
+  carrying `amountCents` is *rejected* whatever the model was told. A proposal names a `subId` and
+  gives a reason; Phase 6 resolves `subId` to an amount through the core, where `savingCents` is
+  already computed and already the ranking axis.
+- **There is no execution tool.** `list_findings`, `check_cancel_guide`, `record_proposal` — that
+  is the whole allowlist. The agent sits *before* the action layer so the demo degrades gracefully,
+  and adding an `execute` tool here would make that ordering fictional.
+- **Every rejection is recorded, not thrown.** Unknown tool, malformed arguments, unknown `subId`,
+  turn cap. The run log is what the demo shows a judge, so "the agent is constrained" has to be
+  visible on screen rather than asserted in a comment.
 - The natural insertion point: `cancelGuide.ts` falls back to `genericGuide(name)`, which fabricates a link. Nixt could not execute a cancellation so it shipped a URL; the agent replaces the weakest branch of an existing resolver with one that acts. That is the answer to "where exactly is the AI here?"
+  - **P5-04, done.** `resolveCancelGuide` tries the verified guide first and never asks the model
+    about a merchant we already know. For an unknown one it describes the settings path in the
+    merchant's own words — and **no URL can ever reach the output**, because a link that 404s is
+    worse than no link. Not a key concern either: the check that matters is a URL *inside a step
+    sentence*, which is where a model actually puts one.
 - Use a cheap instruct model via **OpenRouter** with structured tool output. A small model with a tight schema beats a large one wandering.
-  - **D2 is closed: `meta-llama/llama-3.1-8b-instruct`** ($0.05/M in, $0.08/M out, 131k ctx, ~$0.001/demo run), verified against `/api/v1/models` on Oct 17. Upgrade to `mistralai/mistral-small-3.2-24b-instruct` only if proposals come back weak.
-  - ⚠️ `qwen/qwen3-8b` — the plausible-looking default — **is not in the catalogue**. It was guessed from memory. Verify model IDs against the live endpoint; never reason about them from memory.
-  - The key works: `bun run check-env` gets a real completion. **None of this is built yet** — Phase 5 is the whole agent.
+  - **D2 is CLOSED and REVISED by measurement: `mistralai/mistral-small-3.2-24b-instruct`** ($0.09/M in, $0.25/M out). The original pick, `meta-llama/llama-3.1-8b-instruct`, **cannot be used** — see below.
+  - ⚠️ **`llama-3.1-8b-instruct` doubles every tool call's arguments on OpenRouter.** It emits the same JSON object twice, concatenated: `{"limit":"50"}{"limit":"50"}`, which is not valid JSON. Measured over six consecutive turns: **0 proposals, 0 convergence** — told its arguments were malformed, it produced the identical doubled form again. `mistral-small-3.2-24b-instruct` on the identical prompt: 1 proposal, 0 rejections, answered in 3 turns.
+  - ⚠️ `qwen/qwen3-8b` — the other plausible-looking default — **is not in the catalogue**. It was guessed from memory.
+  - **Verify model IDs against `/api/v1/models`, then verify tool-calling against a live call.** Existence in the catalogue says nothing about whether a model can emit valid arguments; only a run does.
+  - The client takes `model` as a parameter, so a candidate is `OPENROUTER_MODEL=… bun run test:integration` — no code edit.
+  - ⚠️ **Tool results need `tool_call_id`, and the assistant turn that requested them must be echoed
+    first.** Omitting either is an HTTP 400 that mentions a field the loop never touches. Measured
+    live; a local stub server will not catch it, because it does not validate the protocol.
 
 ## Actions and guardrails
 

@@ -311,26 +311,32 @@ allow-list is at `D:\Github\nixt\worker\src\index.ts:42-57` (**not yet ported �
 
 ---
 
-## Phase 5 — The agent (Oct 18–19) · **no execution yet** · **NOT STARTED**
+## Phase 5 — The agent (Oct 18–19) · **no execution yet** · **DONE Oct 17**
 
 > Build order 7. **Deliberately before the action layer** so the demo degrades gracefully.
 >
-> **This is the eligibility gate.** Criterion #1 is PayPal *and* AI, and this phase is the AI half.
-> The credential is ready and unused: `bun run check-env` gets a real completion from
-> `meta-llama/llama-3.1-8b-instruct` (D2). Phases 6 and 7 both wait on this, so it is the shortest
-> path to something demoable.
+> **The eligibility gate is cleared.** Criterion #1 is PayPal *and* AI; this phase is the AI half,
+> and it produces valid proposals against the live model.
+>
+> **Two defects only a live run could find**, both recorded in `AGENTS.md`:
+> `llama-3.1-8b-instruct` cannot emit valid tool arguments on OpenRouter (so **D2 was revised** to
+> `mistral-small-3.2-24b-instruct`), and tool results need `tool_call_id` with the requesting
+> assistant turn echoed first — an HTTP 400 that a local stub server will never catch, because it
+> does not validate the protocol.
 
-- [ ] **P5-01** `[src/agent/]` Bounded loop with a typed tool allowlist — **not** a free-roaming agent → expect a hard cap on turns and a closed tool set; reproducible output, no hallucinated actions
-- [ ] **P5-02** `[src/agent/tools.ts]` OpenRouter client, cheap instruct model, structured tool output → expect schema-valid responses on the test set
-- [ ] **P5-03** `[src/agent/prompts.ts]` Classification + reasoning + ranking + rationale drafting → expect the LLM to **never** compute a normalised monthly figure, decide a refund amount, or execute
-  - Every figure on screen must trace to a pure function in Phase 2. The LLM explains and ranks; it does not compute.
-- [ ] **P5-04** `[src/agent/]` Replace the `genericGuide(name)` fallback in `cancelGuide.ts` with an agent-driven branch → expect an unknown merchant gets a real answer instead of a fabricated link
-  - This is the one-sentence answer to "where exactly is the AI here?" Nixt could only ship a URL; the agent acts.
-- [ ] **P5-05** `[src/agent/]` Sharpen detector `confidence` + templated `subtitle` into real reasoning over the already-structured flags → expect a genuine confidence ranking out of `insights.ts` input
-- [ ] **P5-06** `[test/unit]` Agent determinism: same input + same seed → same proposals → expect green across repeated runs, and a recorded golden set of proposals
-  - The double the agent sees is the real `AccountSource` interface (P3-06), never a hand-built object that happens to match today.
-- [ ] **P5-07** `[test/integration]` Tool allowlist is genuinely closed: an unknown tool name, a schema-invalid response, and a turn-cap breach are all **rejected and recorded**, not silently retried → expect the three failure modes green against a stub OpenRouter server
-  - A small model with a tight schema wanders. These three are how it fails, so they are tested first.
+- [x] **P5-01** `[src/agent/]` Bounded loop with a typed tool allowlist — **not** a free-roaming agent → **DONE.** `src/agent/agent.ts`: three tools, a hard turn cap, and **no execution tool at all**. Membership of the allowlist *is* the dispatch mechanism, so the loop cannot reach a handler that is not in the table.
+- [x] **P5-02** `[src/agent/tools.ts]` OpenRouter client, cheap instruct model, structured tool output → **DONE.** `fetch`-based, no SDK — the architecture gate bans `openai` above the adapter layer anyway. `temperature: 0` plus a fixed seed; the key appears only in the `Authorization` header, never the body, because the body lands in the run log.
+  - **D2 revised by measurement:** `mistralai/mistral-small-3.2-24b-instruct`. The 8B original cost less and produced **zero** proposals.
+- [x] **P5-03** `[src/agent/prompts.ts]` Classification + reasoning + ranking + rationale drafting → **DONE, and the LLM provably never computes money.** `ProposalSchema` is `.strict()`, so a proposal carrying `amountCents` is **rejected** — the rule is a boundary, not a prompt instruction.
+  - `severity` is deliberately a **separate axis** from `savingCents`: collapsing urgency into money is how a $2 finding outranks a $40 one because the model was more emphatic.
+  - The brief omits `displaySaving` entirely, so the model is never shown a figure it might restate as its own.
+- [x] **P5-04** `[src/agent/]` Replace the `genericGuide(name)` fallback with an agent-driven branch → **DONE.** `resolveCancelGuide` checks the verified guide first and **never asks the model about a merchant we already know** — rewriting an answer we hold is strictly worse than reading it.
+  - For an unknown merchant it describes the settings path in the merchant's own words, and **no URL can reach the output** — including one buried inside a step sentence, which is where a model actually puts one.
+- [x] **P5-05** `[src/agent/]` Sharpen detector `confidence` + templated `subtitle` into real reasoning → **DONE.** The agent ranks by urgency over the already-structured findings and records one proposal per subscription. `savingCents` stays the money ranking and is never touched by the model.
+- [x] **P5-06** `[test/unit]` Agent determinism: same input + same seed → same proposals → **DONE.** Byte-identical `AgentRun` across repeated runs. `temperature: 0` alone is not enough in practice, which is why a fixed `seed` goes with it.
+  - A golden set from the **live** model is deliberately *not* committed: it breaks every time the provider changes weights, and a gate that cries wolf gets deleted. The live contract is an opt-in test that asserts schema validity instead.
+- [x] **P5-07** `[test/integration]` Tool allowlist is genuinely closed → **DONE, and the live model produced a real failure of all three kinds.** Unknown tool, malformed arguments, and turn cap are each **rejected and recorded**; a refused call's arguments never reach the run log.
+  - `test/integration/agentLoop.test.ts` runs the real client against a real HTTP server, because the seams *between* the two halves are where they fail to fit — argument double-encoding, tool-name matching, and the `tool_call_id` pairing.
 
 ---
 

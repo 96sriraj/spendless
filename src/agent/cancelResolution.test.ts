@@ -39,7 +39,7 @@ const GUIDANCE_TOOL = GUIDANCE_TOOL_NAME;
 function answering(args: Record<string, unknown>): (request: { messages: readonly ChatMessage[] }) => Promise<Completion> {
   return async () => ({
     text: "",
-    toolCalls: [{ id: "g1", name: GUIDANCE_TOOL, args }],
+    toolCalls: [{ id: "g1", name: GUIDANCE_TOOL, args, argsError: null }],
     finishReason: "tool_calls",
     usage: { totalTokens: 20 },
   });

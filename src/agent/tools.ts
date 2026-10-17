@@ -25,11 +25,36 @@
  * tools would hide exactly the behaviour the run log exists to show.
  */
 
+/**
+ * A message in the conversation, in the shape OpenRouter's chat API expects.
+ *
+ * The `assistant` and `tool` variants carry `tool_calls` / `tool_call_id`
+ * because the protocol requires them to be paired: the assistant turn that
+ * *asked* for a tool, then one tool turn per call carrying that call's id.
+ * Measured live 2026-10-17 — omitting `tool_call_id` produces
+ * `400 tool messages must include a non-empty string tool_call_id` on the very
+ * first tool call, which would have taken the demo down at its first turn.
+ */
 export type ChatMessage =
   | { readonly role: "system"; readonly content: string }
   | { readonly role: "user"; readonly content: string }
-  | { readonly role: "assistant"; readonly content: string | null }
-  | { readonly role: "tool"; readonly name: string; readonly content: string };
+  | {
+      readonly role: "assistant";
+      readonly content: string | null;
+      /** Echoed back verbatim; the API rejects the turn without them. */
+      readonly toolCalls?: readonly {
+        readonly id: string;
+        readonly name: string;
+        /** A JSON *string* on the wire — the same double-encoding as arguments. */
+        readonly arguments: string;
+      }[];
+    }
+  | {
+      readonly role: "tool";
+      readonly toolCallId: string;
+      readonly name: string;
+      readonly content: string;
+    };
 
 /** An OpenRouter function tool, in the shape the API expects. */
 export type ToolSpec = {
@@ -46,6 +71,20 @@ export type ToolCall = {
   readonly name: string;
   /** Parsed. Never the raw JSON string — see `parseArguments`. */
   readonly args: Record<string, unknown>;
+  /**
+   * Why `args` is empty, when the model sent something unusable.
+   *
+   * Present rather than thrown, and that is a deliberate reversal of the first
+   * version. The live 8B model emitted `{"limit":"50"}{"limit":"50"}` — the same
+   * object twice, a streaming-accumulation artefact — and throwing turned one
+   * bad turn into a dead run.
+   *
+   * The loop is where every other bad tool call is rejected and **recorded**,
+   * and it should be the same path here: the run log then shows the model
+   * getting it wrong and correcting, which is a better demonstration of a
+   * constrained agent than a stack trace is.
+   */
+  readonly argsError: string | null;
 };
 
 export type Completion = {
@@ -71,10 +110,16 @@ export type OpenRouterClientConfig = {
   readonly apiKey: string;
   /** Overridable so a test can point at a local server. */
   readonly baseUrl?: string;
+  /**
+   * Overridable so a candidate model can be tried without editing code — which
+   * is how the default below was chosen against a live provider rather than
+   * against a price list.
+   */
   readonly model?: string;
   /**
    * Sent as `seed`. A fixed default, because a client whose reproducibility
    * depends on the caller remembering to set it is a client that will drift.
+   * P5-06: same input, same proposals, which is what makes the run replayable.
    */
   readonly seed?: number;
 };
@@ -91,8 +136,24 @@ export type OpenRouterClient = {
 };
 
 const DEFAULT_BASE_URL = "https://openrouter.ai/api/v1";
-/** D2, verified against the live catalogue 2026-10-17. */
-const DEFAULT_MODEL = "meta-llama/llama-3.1-8b-instruct";
+/**
+ * D2, revised 2026-10-17 by measurement rather than by catalogue.
+ *
+ * `meta-llama/llama-3.1-8b-instruct` is cheaper and was the original pick. It
+ * **cannot be used**: on OpenRouter it emits every tool call's arguments twice,
+ * concatenated — `{"limit":"50"}{"limit":"50"}` — which is not valid JSON. Six
+ * consecutive turns, zero proposals, zero convergence: told its arguments were
+ * malformed, it produced the identical doubled form again.
+ *
+ * `mistralai/mistral-small-3.2-24b-instruct` produces schema-valid tool calls on
+ * the same prompt: one proposal, no rejections, answered in three turns.
+ *
+ * Cost difference is irrelevant at demo volume — 2.7k tokens is about $0.0007 —
+ * so the choice is decided entirely by which one can actually call a tool.
+ * `AGENTS.md` said "a small model with a tight schema beats a large one
+ * wandering"; this one does not wander so much as it cannot emit arguments.
+ */
+const DEFAULT_MODEL = "mistralai/mistral-small-3.2-24b-instruct";
 const DEFAULT_SEED = 20_261_017;
 
 export function createOpenRouterClient(config: OpenRouterClientConfig): OpenRouterClient {
@@ -142,9 +203,29 @@ export function createOpenRouterClient(config: OpenRouterClientConfig): OpenRout
 function toWireMessage(message: ChatMessage): Record<string, unknown> {
   switch (message.role) {
     case "tool":
-      return { role: "tool", name: message.name, content: message.content };
+      // `tool_call_id` is what ties this result to the call that asked for it.
+      // The API rejects the whole conversation without it, which is a 400 with
+      // a message about a field most integrations never think about.
+      return {
+        role: "tool",
+        tool_call_id: message.toolCallId,
+        name: message.name,
+        content: message.content,
+      };
     case "assistant":
-      return { role: "assistant", content: message.content };
+      return {
+        role: "assistant",
+        content: message.content,
+        ...(message.toolCalls === undefined
+          ? {}
+          : {
+              tool_calls: message.toolCalls.map((c) => ({
+                id: c.id,
+                type: "function",
+                function: { name: c.name, arguments: c.arguments },
+              })),
+            }),
+      };
     default:
       return { role: message.role, content: message.content };
   }
@@ -191,11 +272,13 @@ function parseToolCall(raw: unknown): ToolCall {
   const call = (typeof raw === "object" && raw !== null ? raw : {}) as Record<string, unknown>;
   const fn = (call["function"] ?? {}) as Record<string, unknown>;
   const name = typeof fn["name"] === "string" ? fn["name"] : "";
+  const { args, error } = parseArguments(fn["arguments"]);
 
   return {
     id: typeof call["id"] === "string" ? call["id"] : "",
     name,
-    args: parseArguments(fn["arguments"], name),
+    args,
+    argsError: error,
   };
 }
 
@@ -205,36 +288,39 @@ function parseToolCall(raw: unknown): ToolCall {
  *
  * The dangerous failure is `{}`. A model emitting `"{oops"` is a model having a
  * bad turn; reading it as "called the tool with no arguments" runs the tool on
- * invented input and produces a plausible wrong answer. So unparseable
- * arguments throw rather than degrade.
+ * invented input and produces a plausible wrong answer. So a parse failure is
+ * **reported**, never silently degraded to an empty object — see
+ * `ToolCall.argsError`.
  */
-function parseArguments(raw: unknown, toolName: string): Record<string, unknown> {
-  if (raw === undefined || raw === null) return {};
-  if (typeof raw === "object") return raw as Record<string, unknown>;
-
+function parseArguments(
+  raw: unknown,
+): { args: Record<string, unknown>; error: string | null } {
+  if (raw === undefined || raw === null) return { args: {}, error: null };
+  if (typeof raw === "object") {
+    return { args: raw as Record<string, unknown>, error: null };
+  }
   if (typeof raw !== "string") {
-    throw new OpenRouterError(`tool ${toolName} sent arguments of an unexpected type`, 200, null);
+    return { args: {}, error: `sent arguments of an unexpected type (${typeof raw})` };
   }
 
   const trimmed = raw.trim();
-  if (trimmed.length === 0) return {};
+  if (trimmed.length === 0) return { args: {}, error: null };
 
   try {
     const parsed = JSON.parse(trimmed) as unknown;
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-      throw new OpenRouterError(
-        `tool ${toolName} sent arguments that are not a JSON object`,
-        200,
-        null,
-      );
+      return {
+        args: {},
+        error: `sent arguments that are not a JSON object: ${trimmed.slice(0, 120)}`,
+      };
     }
-    return parsed as Record<string, unknown>;
-  } catch (cause) {
-    if (cause instanceof OpenRouterError) throw cause;
-    throw new OpenRouterError(
-      `tool ${toolName} sent arguments that are not valid JSON: ${trimmed.slice(0, 120)}`,
-      200,
-      null,
-    );
+    return { args: parsed as Record<string, unknown>, error: null };
+  } catch {
+    // Snippet, not the whole thing. This string reaches the run log, which is
+    // rendered on screen, and a model can put anything in an argument.
+    return {
+      args: {},
+      error: `sent arguments that are not valid JSON: ${trimmed.slice(0, 80)}`,
+    };
   }
 }

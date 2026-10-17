@@ -194,6 +194,21 @@ export async function runAgent(deps: AgentDependencies): Promise<AgentRun> {
       });
     }
 
+    // The assistant turn that asked for the tools goes into the transcript
+    // first, carrying the calls verbatim. OpenRouter's protocol requires the
+    // pairing: a tool result without the assistant turn that requested it, or
+    // without `tool_call_id`, is rejected with a 400 that has nothing to do
+    // with anything we can see in the loop.
+    messages.push({
+      role: "assistant",
+      content: completion.text,
+      toolCalls: completion.toolCalls.map((c) => ({
+        id: c.id,
+        name: c.name,
+        arguments: JSON.stringify(c.args),
+      })),
+    });
+
     for (const call of completion.toolCalls) {
       const outcome = dispatch(call, {
         known,
@@ -221,10 +236,11 @@ export async function runAgent(deps: AgentDependencies): Promise<AgentRun> {
 
       // The refusal text is ours, never the model's arguments. A rejected call
       // that echoes its own input back can be smuggled in on the next turn.
-      messages.push({ role: "tool", name: call.name, content: outcome.reply });
       messages.push({
-        role: "assistant",
-        content: `The tool "${call.name}" was refused: ${outcome.reply}`,
+        role: "tool",
+        toolCallId: call.id,
+        name: call.name,
+        content: outcome.reply,
       });
     }
   }
@@ -266,6 +282,14 @@ type DispatchContext = {
 
 /** @returns the text handed back to the model, always ours. */
 function dispatch(call: ToolCall, ctx: DispatchContext): { reply: string } {
+  // Malformed arguments come first, before the allowlist check, because the
+  // reason the model needs is about its own output rather than about which
+  // tools exist. The live 8B model emits `{"limit":"50"}{"limit":"50"}` — the
+  // same object twice — and the correction it needs is "send one object".
+  if (call.argsError !== null) {
+    return rejectArgs(ctx, call.name, call.argsError);
+  }
+
   const spec = TOOLS[call.name];
   if (spec === undefined) {
     ctx.onReject({
