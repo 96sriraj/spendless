@@ -128,8 +128,12 @@ CREATE TABLE IF NOT EXISTS action_proposals (
   run_id             TEXT,
   kind               TEXT NOT NULL
                        CHECK (kind IN ('refund', 'cancel_subscription', 'resolve_dispute', 'ask_usage')),
+  -- `executing` exists so a crash mid-call is visible rather than a lie.
+  -- Without it a row must be claimed as `executed` *before* the provider is
+  -- called, and a failure then leaves a proposal claiming success with no
+  -- result row - the audit trail's one unforgivable falsehood.
   status             TEXT NOT NULL DEFAULT 'proposed'
-                       CHECK (status IN ('proposed', 'approved', 'rejected', 'executed', 'failed', 'expired')),
+                       CHECK (status IN ('proposed', 'approved', 'executing', 'executed', 'rejected', 'failed', 'expired')),
   target_id          TEXT,
   -- Nullable: a cancellation moves no money. A refund always has one.
   amount_cents       INTEGER CHECK (amount_cents IS NULL OR amount_cents > 0),
@@ -140,7 +144,11 @@ CREATE TABLE IF NOT EXISTS action_proposals (
   requires_approval  INTEGER NOT NULL DEFAULT 1 CHECK (requires_approval = 1),
   approved_at        TEXT,
   approved_by        TEXT,
-  created_at         TEXT NOT NULL
+  created_at         TEXT NOT NULL,
+  decided_at         TEXT,
+  -- Why the guardrails allowed or refused it, recorded at decision time. A cap
+  -- that changes later must not retroactively explain an earlier decision.
+  decision_reason    TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_action_proposals_status ON action_proposals (status);
