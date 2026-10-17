@@ -13,13 +13,34 @@ import { heroFigure, type StateResponse } from "./hero";
 function state(overrides: Partial<StateResponse> = {}): StateResponse {
   return {
     generatedAt: "2026-10-17T00:00:00.000Z",
+    // Coherent by default: one finding of 15,990 and a total of 15,990. The first
+    // version of this fixture had 15,990 against `findings: []`, and the mismatch
+    // was only noticed because the module grew a branch that checks the findings
+    // — at which point the contradiction turned into a real failure. A fixture
+    // that describes a state the server cannot produce teaches the wrong thing.
     totalRiskCents: 15_990,
     currency: "USD",
-    findings: [],
-    subscriptions: [],
+    findings: [finding()],
+    subscriptions: [{ id: "sub-a" }],
     lanes: ["seeded_history"],
     transactionCount: 23,
     database: true,
+    ...overrides,
+  };
+}
+
+function finding(
+  overrides: Partial<StateResponse["findings"][number]> = {},
+): StateResponse["findings"][number] {
+  return {
+    kind: "unused",
+    subId: "sub-a",
+    title: "sub-a looks unused",
+    subtitle: "",
+    savingCents: 15_990,
+    cta: "Cancel",
+    confidence: "likely",
+    lane: "seeded_history",
     ...overrides,
   };
 }
@@ -28,9 +49,16 @@ describe("heroFigure", () => {
   it("shows exactly what the API computed, with no arithmetic of its own", () => {
     // `totalRiskCents` is already the sum the server did. A client that summed
     // the findings again would agree today and disagree the day the server
-    // changed its ranking — so this asserts equality, not near-equality.
-    const hero = heroFigure(state({ totalRiskCents: 15_990 }));
+    // changed its ranking — so this asserts equality, not near-equality, and it
+    // uses a case where re-summing would give a *different* number.
+    const hero = heroFigure(
+      state({
+        totalRiskCents: 15_990,
+        findings: [finding({ savingCents: 5_000 }), finding({ subId: "sub-b", savingCents: 1_000 })],
+      }),
+    );
 
+    // 6,000 ≠ 15,990. If this module were re-summing, it would render 6,000.
     expect(hero.cents).toBe(15_990);
     expect(hero.currency).toBe("USD");
   });
@@ -62,10 +90,38 @@ describe("heroFigure", () => {
     // adding euros to dollars. The client has to honour that: printing "$0.00 at
     // risk" off the back of a null currency would turn "I cannot tell you" into
     // "you have nothing to lose", which is the more dangerous of the two lies.
-    const hero = heroFigure(state({ totalRiskCents: 0, currency: null }));
+    const hero = heroFigure(
+      state({
+        totalRiskCents: 0,
+        currency: null,
+        findings: [finding()],
+        subscriptions: [{ id: "sub-a" }, { id: "sub-b" }],
+      }),
+    );
 
     expect(hero.totalled).toBe(false);
     expect(hero.headline).toMatch(/cannot/i);
+  });
+
+  it("does not blame the currency when there is simply nothing to read", () => {
+    // An empty database also reports `currency: null` — there is no currency to
+    // report when there is no data. Announcing "cannot total, these span more
+    // than one currency" to a merchant who has simply not loaded anything is
+    // technically defensible and completely useless, and it buries the actual
+    // state: there is nothing here yet.
+    const hero = heroFigure(
+      state({
+        totalRiskCents: 0,
+        currency: null,
+        findings: [],
+        subscriptions: [],
+        lanes: [],
+        transactionCount: 0,
+      }),
+    );
+
+    expect(hero.headline).not.toMatch(/currency/i);
+    expect(hero.tone).toBe("ink");
   });
 
   it("names the lane the money came from, because history is not a payment", () => {

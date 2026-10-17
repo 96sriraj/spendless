@@ -30,6 +30,7 @@
 
 import { createDatabase } from "../src/db";
 import { buildReadModel } from "../src/services/readModel";
+import { seedScenario } from "../src/services/scenario";
 import { ensureSchema } from "./schema";
 
 export type Env = {
@@ -103,6 +104,35 @@ const routes: Record<string, Route> = {
     const model = await buildReadModel(db, new Date());
 
     return json({ ...model, database: true });
+  },
+
+  /**
+   * The one-click scenario.
+   *
+   * `AGENTS.md` — "demo reliability beats features… so the demo is rehearsable
+   * without hand-crafting state." Rehearsable is the operative word: on demo day
+   * nobody is running a migration and writing SQL by hand.
+   *
+   * POST only, deliberately. A state-changing verb is a bad fit for a path a
+   * client might poll, and a demo that reseeds itself mid-sentence is worse than
+   * one that needs a button pressed.
+   *
+   * Replace, not accumulate — a second click must produce the same figure, or
+   * the run cannot be rehearsed against a known number.
+   */
+  "POST /api/seed": async (_request, env) => {
+    if (env.DB === undefined) {
+      return json({ error: "no database configured" }, 503);
+    }
+
+    const db = createDatabase(env.DB);
+    await ensureSchema(env.DB);
+    const seeded = await seedScenario(db, new Date());
+
+    return json({ ...seeded.model, database: true, seeded: {
+      transactions: seeded.transactions,
+      usage: seeded.usage,
+    } });
   },
 };
 

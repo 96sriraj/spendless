@@ -103,9 +103,59 @@ export function createSqliteD1(database?: SqliteDatabase): D1Database {
       }
       return results;
     },
+    /**
+     * D1's `exec`, not SQLite's — deliberately, and this used to be wrong.
+     *
+     * `better-sqlite3.exec()` hands the whole string to `sqlite3_exec`, which
+     * parses comments correctly. D1's `exec()` **splits on `;` first** and then
+     * requires every chunk to contain a statement. So a semicolon inside a `--`
+     * comment — which `schema.sql` line 10 has — cuts the comment in half and
+     * leaves a fragment with nothing in it:
+     *
+     *     D1_EXEC_ERROR: SQL code did not contain a statement.
+     *
+     * The old version called `db.exec(query)` and was *more permissive than the
+     * real service*, which is the worst direction for a test double to be wrong
+     * in. Every integration test passed while the running Worker 500'd on the
+     * first request.
+     *
+     * So the split is reproduced here, comment stripping and all. A test double
+     * that is stricter than production is annoying; one that is laxer is a
+     * time bomb.
+     */
     async exec(query: string): Promise<{ count: number; duration: number }> {
-      db.exec(query);
+      for (const chunk of splitLikeD1(query)) {
+        db.exec(chunk);
+      }
       return { count: 0, duration: 0 };
     },
   };
+}
+
+/**
+ * Split `exec` input the way D1 does: on `;`, then reject any chunk that holds no
+ * statement once comments are removed.
+ */
+export function splitLikeD1(query: string): string[] {
+  return query
+    .split(";")
+    .map((chunk) => stripLineComments(chunk).trim())
+    .filter((chunk) => chunk.length > 0);
+}
+
+/**
+ * Remove `--` comments.
+ *
+ * Line comments only. `schema.sql` uses no block comments, and stripping `/*`
+ * without a real parser would corrupt any string literal containing `/*`, which
+ * is a much worse failure than leaving block comments in place.
+ */
+export function stripLineComments(sql: string): string {
+  return sql
+    .split("\n")
+    .map((line) => {
+      const marker = line.indexOf("--");
+      return marker === -1 ? line : line.slice(0, marker);
+    })
+    .join("\n");
 }

@@ -112,6 +112,24 @@ export function heroFigure(state: StateResponse | null): HeroFigure {
     };
   }
 
+  // "Nothing to read" is checked before the currency question, and the order is
+  // the point. An empty database reports `currency: null` too — there is no
+  // currency to report when there is no data — so checking currency first would
+  // tell a merchant who has loaded nothing that their figures "span more than
+  // one currency". Technically defensible, completely useless, and it buries the
+  // actual state.
+  if (state.findings.length === 0) {
+    return {
+      cents: 0,
+      currency: state.currency ?? "USD",
+      tone: "ink",
+      headline: "Nothing at risk right now",
+      provenance,
+      totalled: true,
+      loading: false,
+    };
+  }
+
   // The server withholds the total across currencies rather than adding euros to
   // dollars. Honouring that is the whole point of it withholding it.
   if (state.currency === null) {

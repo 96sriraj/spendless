@@ -199,6 +199,89 @@ describe("GET /api/state", () => {
   });
 });
 
+/**
+ * `POST /api/seed` — the one-click scenario.
+ *
+ * `AGENTS.md`: "demo reliability beats features: a one-click 'seed the scenario'
+ * that creates real plans and subscriptions through real API calls, so the demo
+ * is rehearsable without hand-crafting state." Rehearsable is the operative
+ * word: on demo day nobody is running a migration and writing SQL.
+ */
+describe("POST /api/seed", () => {
+  it("writes the scenario and returns the resulting model", async () => {
+    const db = testDatabase();
+    const response = await call(
+      new Request("https://spendless.test/api/seed", { method: "POST" }),
+      { DB: db },
+    );
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      totalRiskCents: number;
+      lanes: string[];
+      transactionCount: number;
+      subscriptions: { id: string }[];
+    };
+
+    expect(body.transactionCount).toBeGreaterThan(0);
+    expect(body.lanes).toEqual(["seeded_history"]);
+    expect(body.subscriptions.map((s) => s.id)).toContain("sub-netflix");
+  });
+
+  it("leaves the scenario reachable, so the headline finding can actually fire", async () => {
+    // The point of seeding. `buildSubscriptions` always writes `lastUsedDate:
+    // null` — it has no way to know one — so the unused-subscription finding
+    // depends entirely on usage events existing. Without them the scenario
+    // produces a screen with a figure of zero and no explanation, which is
+    // indistinguishable from the product being broken.
+    const db = testDatabase();
+    await call(new Request("https://spendless.test/api/seed", { method: "POST" }), { DB: db });
+
+    const body = (await (await get("/api/state", { DB: db })).json()) as {
+      totalRiskCents: number;
+      findings: { subId: string; lane: string }[];
+    };
+
+    expect(body.totalRiskCents).toBeGreaterThan(0);
+    expect(body.findings.map((f) => f.subId)).toContain("sub-netflix");
+    // Labelled as ours. The finding is real arithmetic over real rows, but the
+    // rows are the ones we wrote.
+    expect(body.findings.every((f) => f.lane === "seeded_history")).toBe(true);
+  });
+
+  it("is repeatable, so the demo can be reset mid-run", async () => {
+    const db = testDatabase();
+    const first = await call(new Request("https://spendless.test/api/seed", { method: "POST" }), {
+      DB: db,
+    });
+    const second = await call(new Request("https://spendless.test/api/seed", { method: "POST" }), {
+      DB: db,
+    });
+
+    expect(second.status).toBe(200);
+    const a = (await first.json()) as { totalRiskCents: number; transactionCount: number };
+    const b = (await second.json()) as { totalRiskCents: number; transactionCount: number };
+    // Replaced, not accumulated. A second seed that doubled the rows would give
+    // a different figure, and a demo figure that moves between clicks is a demo
+    // nobody can trust on stage.
+    expect(b.transactionCount).toBe(a.transactionCount);
+    expect(b.totalRiskCents).toBe(a.totalRiskCents);
+  });
+
+  it("refuses a GET rather than quietly seeding on a read", async () => {
+    // A state-changing verb on a path a client might poll is how a demo ends up
+    // reseeding itself mid-sentence.
+    const response = await get("/api/seed", { DB: testDatabase() });
+    expect(response.status).toBe(404);
+  });
+
+  it("says so plainly when there is no database, instead of pretending to seed", async () => {
+    const response = await call(new Request("https://spendless.test/api/seed", { method: "POST" }), {});
+    expect(response.status).toBe(503);
+    expect((await response.json()) as { error: string }).toHaveProperty("error");
+  });
+});
+
 function testDatabase(): D1Database {
   const sqlite = new BetterSqlite3(":memory:");
   sqlite.exec(readFileSync(path.join(REPO_ROOT, "src", "db", "schema.sql"), "utf8"));
