@@ -53,7 +53,10 @@ export function recordPayloadsFor(
 
   for (const result of results) {
     if (result.ok !== true) continue;
-    if (result.status !== "COMPLETED") continue;
+    // StringType values arrive lowercase from `McpPayPalExecutor`'s REFUND_STATUS
+    // mapping and the sidecar echoes them verbatim, so settle case-insensitively.
+    // Nothing is sent up: the payload below still carries the literal "COMPLETED".
+    if ((result.status ?? "").toUpperCase() !== "COMPLETED") continue;
     if (result.refundId === undefined) continue;
     if (bySubId.has(result.subId)) continue;
 

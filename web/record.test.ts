@@ -57,9 +57,44 @@ describe("recordPayloadsFor", () => {
     expect(recordPayloadsFor([candidate()], [refused])).toEqual([]);
   });
 
+  it("records a sidecar result echoing PayPal's lowercase status", () => {
+    // `McpPayPalExecutor` maps PayPal's COMPLETED to "completed" and the
+    // sidecar echoes it verbatim; the ledger must accept the settled refund
+    // whatever case it arrives in.
+    const payloads = recordPayloadsFor([candidate()], [result({ status: "completed" })]);
+
+    expect(payloads).toEqual([
+      {
+        proposalId: "act-1",
+        subId: "sub-netflix",
+        refundId: "40551413F19556526",
+        status: "COMPLETED",
+        amountCents: 1_599,
+        currency: "USD",
+      },
+    ]);
+  });
+
+  it("records uppercase and lowercase settled results alike, once per subId", () => {
+    const payloads = recordPayloadsFor(
+      [candidate(), candidate({ id: "act-2", subId: "sub-figma", amountCents: 1_500 })],
+      [
+        result({ status: "completed" }),
+        result({ subId: "sub-figma", refundId: "REF-UPPER", status: "COMPLETED" }),
+        result({ subId: "sub-figma", refundId: "REF-LOWER-AGAIN", status: "Completed" }),
+      ],
+    );
+
+    expect(payloads).toHaveLength(2);
+    expect(payloads.map((p) => p.status)).toEqual(["COMPLETED", "COMPLETED"]);
+    expect(payloads.map((p) => p.subId)).toEqual(["sub-netflix", "sub-figma"]);
+  });
+
   it("never records a result that is not settled COMPLETED", () => {
     const pending = result({ status: "PENDING" });
     expect(recordPayloadsFor([candidate()], [pending])).toEqual([]);
+    // The same refusal holds whatever case the sidecar echoes.
+    expect(recordPayloadsFor([candidate()], [result({ status: "pending" })])).toEqual([]);
   });
 
   it("never records a result without a refund id to prove it happened", () => {
