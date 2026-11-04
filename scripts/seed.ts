@@ -86,10 +86,23 @@ const method = process.argv.includes("--method")
   ? (process.argv[process.argv.indexOf("--method") + 1] ?? "approve")
   : "approve";
 
+/**
+ * One token per seed run, so every `invoice_id` is unique across runs.
+ *
+ * The sandbox account rejects a duplicate invoice id (422 at capture), so
+ * re-seeding the same merchant key with a fixed invoice id fails the second
+ * time. This token is minted once per process and makes the invoice distinct
+ * while leaving `custom_id` / description — the fields the detectors key on —
+ * stable.
+ */
+const RUN_TOKEN = `${Date.now().toString(36)}`;
+
 async function createOrder(entry: (typeof SCENARIO)[number]): Promise<Created | null> {
   const { status, body } = await call("/v2/checkout/orders", token, {
     method: "POST",
-    body: JSON.stringify(buildOrderPayload(entry, SEED_CURRENCY, { modern: true })),
+    body: JSON.stringify(
+      buildOrderPayload(entry, SEED_CURRENCY, { modern: true, invoiceSuffix: RUN_TOKEN }),
+    ),
   });
   if (status < 200 || status >= 300) {
     console.log(`  [order failed] ${entry.key}: HTTP ${status} — ${describeFailure(body)}`);

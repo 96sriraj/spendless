@@ -42,6 +42,20 @@ describe("buildOrderPayload - the identity that actually survives", () => {
     expect(unit.custom_id).toBe(NETFLIX.key);
     expect(unit.reference_id).toBe(NETFLIX.key);
   });
+
+  it("should make invoice_id unique per run when a suffix is given, without touching identity", () => {
+    // The regression this pins: a fixed invoice_id collides on the second seed
+    // of the same merchant key, and the sandbox account rejects it with a 422
+    // "Duplicate Invoice ID" at capture. The suffix makes the invoice distinct
+    // while the identity carriers — custom_id and the description — stay keyed
+    // on the merchant, so the detectors are unaffected.
+    const unit = buildOrderPayload(NETFLIX, "USD", { invoiceSuffix: "abc123" }).purchase_units[0]!;
+
+    expect(unit.invoice_id).toBe("sub-netflix-abc123");
+    expect(unit.custom_id).toBe(NETFLIX.key);
+    expect(unit.reference_id).toBe(NETFLIX.key);
+    expect(readSeedMarker(unit.description)).toBe(NETFLIX.key);
+  });
 });
 
 const NETFLIX = { key: "sub-netflix", label: "Netflix", amountCents: 1599 };

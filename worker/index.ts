@@ -57,7 +57,34 @@ export type Env = {
    */
   EXECUTION_ENABLED?: string;
   REFUND_CAP_CENTS?: string;
+  /**
+   * Pins the clock the read model and the run are computed against.
+   *
+   * Absent means the real wall clock, which is what production uses. It exists
+   * for two callers that need a *stable* now: a demo recording, where the
+   * headline figure must be identical on every take, and a test, whose seeded
+   * fixture is dated and whose findings must not drift out of the renewal window
+   * as real days pass. An unparseable value is ignored rather than throwing — a
+   * misconfigured demo should fall back to a working clock, not a blank screen.
+   */
+  DEMO_NOW?: string;
 };
+
+/**
+ * The clock every route computes against.
+ *
+ * Reads `DEMO_NOW` when it is set and parseable, and the real wall clock
+ * otherwise. Centralised so the seed, the read model and the run cannot
+ * disagree about what "now" is — that disagreement is exactly the bug that let a
+ * fixture dated last week stop producing findings this week.
+ */
+function clock(env: Env): Date {
+  if (env.DEMO_NOW !== undefined) {
+    const pinned = new Date(env.DEMO_NOW);
+    if (!Number.isNaN(pinned.getTime())) return pinned;
+  }
+  return new Date();
+}
 
 type Route = (request: Request, env: Env, url: URL) => Response | Promise<Response>;
 
@@ -111,7 +138,7 @@ const routes: Record<string, Route> = {
 
     const db = createDatabase(env.DB);
     await ensureSchema(env.DB);
-    const model = await buildReadModel(db, new Date());
+    const model = await buildReadModel(db, clock(env));
 
     return json({ ...model, database: true });
   },
@@ -137,7 +164,7 @@ const routes: Record<string, Route> = {
 
     const db = createDatabase(env.DB);
     await ensureSchema(env.DB);
-    const seeded = await seedScenario(db, new Date());
+    const seeded = await seedScenario(db, clock(env));
 
     return json({ ...seeded.model, database: true, seeded: {
       transactions: seeded.transactions,
@@ -168,14 +195,15 @@ const routes: Record<string, Route> = {
 
     const db = createDatabase(env.DB);
     await ensureSchema(env.DB);
-    const { findings } = await buildReadModel(db, new Date());
+    const now = clock(env);
+    const { findings } = await buildReadModel(db, now);
 
     const stream = streamAgentRun({
       db,
-      runId: newRunId(new Date()),
+      runId: newRunId(now),
       findings,
       complete,
-      now: new Date(),
+      now,
     });
 
     // `ReadableStream` rather than a hand-rolled `TransformStream`: the Worker
@@ -243,7 +271,7 @@ const routes: Record<string, Route> = {
 
     const db = createDatabase(env.DB);
     await ensureSchema(env.DB);
-    const now = new Date();
+    const now = clock(env);
     const { findings } = await buildReadModel(db, now);
 
     const outcomes: { proposalId: string; ok: boolean; message: string }[] = [];
