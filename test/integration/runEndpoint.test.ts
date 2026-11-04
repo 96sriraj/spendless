@@ -46,7 +46,15 @@ function completion(text: string, toolCalls: Completion["toolCalls"] = []): Comp
 }
 
 async function run(env: Env): Promise<Response> {
-  return worker.fetch(new Request("https://spendless.test/api/run", { method: "POST" }), env);
+  // Pin the worker's clock to the fixture's date. The seed is written relative
+  // to NOW, and `checkUnused` only fires inside a seven-day renewal window — so
+  // reading the model against the real wall clock made the Netflix finding drift
+  // out of range as real days passed, and the proposal silently vanished. The
+  // clock is now explicit rather than whatever day the suite happens to run.
+  return worker.fetch(new Request("https://spendless.test/api/run", { method: "POST" }), {
+    ...env,
+    DEMO_NOW: NOW.toISOString(),
+  });
 }
 
 /** Split an SSE body into its `data:` payloads. */
@@ -110,6 +118,44 @@ describe("POST /api/run", () => {
     const done = events[events.length - 1] as { type: string; proposals: { subId: string }[] };
     expect(done.type).toBe("done");
     expect(done.proposals.map((p) => p.subId)).toEqual(["sub-netflix"]);
+  });
+
+  it("computes findings against DEMO_NOW when it is set, not the wall clock", async () => {
+    // The regression this pins: the seed is written relative to NOW and the
+    // Netflix finding only exists inside a seven-day renewal window. Reading
+    // against the real wall clock made the finding — and therefore the whole
+    // proposal — drift out of range as real days passed after the fixture's
+    // date. With DEMO_NOW matching the seed, the finding is produced on any day
+    // the suite runs. Without a usable DEMO_NOW the model would never be asked
+    // for a proposal because there would be nothing to propose.
+    let turn = 0;
+    __setCompleteForTests(async () => {
+      turn += 1;
+      if (turn > 1) return completion("Proposed a refund for the idle subscription.");
+      return completion("", [
+        {
+          id: "c1",
+          name: "record_proposal",
+          argsError: null,
+          args: {
+            subId: "sub-netflix",
+            action: "refund",
+            category: "idle_subscription",
+            severity: 4,
+            rationale: "No use recorded in three months.",
+          },
+        },
+      ]);
+    });
+
+    const response = await worker.fetch(
+      new Request("https://spendless.test/api/run", { method: "POST" }),
+      { DB: await seeded(), OPENROUTER_API_KEY: "unused", DEMO_NOW: NOW.toISOString() },
+    );
+    const events = frames(await response.text()).map((p) => JSON.parse(p) as { type: string; proposals?: { subId: string }[] });
+    const done = events[events.length - 1]!;
+    expect(done.type).toBe("done");
+    expect(done.proposals!.map((p) => p.subId)).toEqual(["sub-netflix"]);
   });
 
   it("says so plainly when no API key is configured, rather than opening a stream that never ends", async () => {

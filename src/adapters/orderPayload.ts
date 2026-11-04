@@ -116,7 +116,7 @@ export type OrderPayload = {
 export function buildOrderPayload(
   entry: OrderEntry,
   currency: Currency = DEFAULT_CURRENCY,
-  options: { readonly modern?: boolean } = {},
+  options: { readonly modern?: boolean; readonly invoiceSuffix?: string } = {},
 ): OrderPayload {
   const lines: OrderLine[] = [
     { label: entry.label, amountCents: entry.amountCents },
@@ -131,7 +131,16 @@ export function buildOrderPayload(
     purchase_units: [
       {
         reference_id: entry.key,
-        invoice_id: entry.key,
+        // `invoice_id` must be unique per transaction — a sandbox account can be
+        // configured to reject a duplicate, which is a 422 at capture time that
+        // reads like a malformed request. A suffix (a run token) makes each
+        // seed run's invoice distinct. It does not survive Transaction Search
+        // (measured 2026-10-17), so identity still lives in `custom_id` and the
+        // `description` below; the suffix costs nothing.
+        invoice_id:
+          options.invoiceSuffix === undefined
+            ? entry.key
+            : `${entry.key}-${options.invoiceSuffix}`,
         custom_id: entry.key,
         // Marker first, label second. See the note above: this field is the only
         // one measured to survive, so it has to carry the key itself.

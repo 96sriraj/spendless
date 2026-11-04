@@ -40,6 +40,7 @@ import {
   type RunState,
 } from "./runlog";
 import { formatMinor } from "./format";
+import { isReachable, requestLocalRefund } from "./localRefund";
 
 /** A `\n\n`-delimited chunk can split a UTF-8 sequence, so decode per frame. */
 const decoder = new TextDecoder();
@@ -200,10 +201,27 @@ function Approve({
   const [outcomes, setOutcomes] = useState<{ ok: boolean; message: string }[] | null>(null);
 
   const approve = useCallback(async () => {
-    const ids = proposals.filter((p) => p.status === "proposed").map((p) => p.id);
+    const pending = proposals.filter((p) => p.status === "proposed");
+    const ids = pending.map((p) => p.id);
     if (ids.length === 0) return;
     setBusy(true);
     try {
+      // Option A first: if the local refund sidecar is up, real sandbox money
+      // moves and the screen shows the actual COMPLETED result. This is the
+      // video path. When the sidecar is absent — the deployed build, or dev
+      // without it running — fall back to the Worker route, which runs the real
+      // guardrail chain and then honestly says nothing was sent. Never a
+      // fabricated success.
+      if (await isReachable()) {
+        const payable = pending.filter((p) => p.amountCents !== null);
+        const results = await Promise.all(
+          payable.map((p) => requestLocalRefund(p.subId, p.amountCents)),
+        );
+        setOutcomes(results.map((r) => ({ ok: r.ok, message: r.message })));
+        onDone();
+        return;
+      }
+
       const response = await fetch("/api/actions/approve", {
         method: "POST",
         headers: { "content-type": "application/json" },
