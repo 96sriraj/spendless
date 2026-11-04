@@ -17,7 +17,7 @@
  * value arrives already in minor units and is only ever *formatted*.
  */
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { formatMinor } from "./format";
 import { heroFigure, type StateResponse } from "./hero";
 import { RunPanel } from "./RunPanel";
@@ -162,6 +162,26 @@ export default function App() {
 
   const hero = heroFigure(state);
 
+  /**
+   * Refetch the read model AND put the body on screen.
+   *
+   * The previous version of this flowed the response into a `.catch()`: fetched,
+   * parsed, discarded — so the hero could never update even in principle, and a
+   * merchant who approved a real refund watched the same figure forever. Passed
+   * into `RunPanel` (which owns the actions that change the figure) so the refetch
+   * happens when the merchant acts, not on a poll.
+   *
+   * A failed refresh keeps the last good state visible rather than blanking the
+   * hero into "Reading your account…" mid-demo; the first-load path below is the
+   * one that must distinguish "no data yet" from "fetch failed".
+   */
+  const refreshState = useCallback(() => {
+    void fetch("/api/state")
+      .then((r) => r.json() as Promise<StateResponse>)
+      .then((body) => setState(body))
+      .catch(() => undefined);
+  }, []);
+
   return (
     <div className="app">
       <header className="bar">
@@ -187,7 +207,7 @@ export default function App() {
           </p>
         </section>
 
-        <RunPanel />
+        <RunPanel onStateRefresh={refreshState} />
       </main>
     </div>
   );

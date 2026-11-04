@@ -34,6 +34,7 @@ import type { ChatMessage, ToolSpec } from "../src/agent/tools";
 import { createKillSwitch } from "../src/actions/killSwitch";
 import { buildReadModel } from "../src/services/readModel";
 import { approveAndExecute, unavailableExecutor } from "../src/services/actions";
+import { recordExecutedRefund } from "../src/services/recordRefund";
 import { newRunId, streamAgentRun } from "../src/services/runStream";
 import { seedScenario } from "../src/services/scenario";
 import { ensureSchema } from "./schema";
@@ -300,6 +301,68 @@ const routes: Record<string, Route> = {
 
     return json({ outcomes });
   },
+
+  /**
+   * The recording of what the sidecar actually did.
+   *
+   * Option A (the video path) refunds real sandbox money through the local
+   * sidecar on :8788, which writes nothing to the store — so the read model
+   * kept saying the money was at risk after it had been recovered. This route
+   * is the UI telling the store what PayPal already did, and the store then
+   * runs the very same ledger transitions the in-process path would have:
+   * `proposed -> approved -> executing -> executed`, plus a result row carrying
+   * the real refund id.
+   *
+   * The transitions stay compare-and-set (`src/db/actions.ts`), so a second
+   * recording of the same refund loses the race and yields ONE result row. A
+   * refusal here is an outcome with a sentence — a lost race between a screen
+   * and a PayPal settle is normal, not a fault.
+   *
+   * The guardrails are deliberately NOT re-run. This moves no money; execution
+   * already happened out of process, and refusing to record does not un-refund
+   * it — it only leaves the screen lying.
+   */
+  "POST /api/actions/record": async (request, env) => {
+    if (env.DB === undefined) return json({ error: "no database configured" }, 503);
+
+    const parsed = await readRecordBody(request);
+    if (parsed === null) {
+      return json(
+        {
+          error:
+            'expected { proposalId, subId, refundId, status: "COMPLETED", amountCents, currency: "USD" | "INR" } recording one settled refund',
+        },
+        400,
+      );
+    }
+
+    const db = createDatabase(env.DB);
+    await ensureSchema(env.DB);
+
+    const outcome = await recordExecutedRefund(
+      {
+        db,
+        proposalId: parsed.proposalId,
+        subId: parsed.subId,
+        refundId: parsed.refundId,
+        amountCents: parsed.amountCents,
+        currency: parsed.currency,
+        approvedBy: "merchant (recorded from the sidecar)",
+      },
+      () => clock(env).toISOString(),
+    );
+
+    return json({
+      ok: true,
+      outcomes: [
+        {
+          proposalId: parsed.proposalId,
+          ok: outcome.ok,
+          message: outcome.ok ? outcome.message : outcome.reason,
+        },
+      ],
+    });
+  },
 };
 
 /**
@@ -321,6 +384,55 @@ async function readProposalIds(request: Request): Promise<string[] | null> {
   if (!Array.isArray(ids)) return null;
   const strings = ids.filter((id): id is string => typeof id === "string" && id.length > 0);
   return strings.length === ids.length && strings.length > 0 ? strings : null;
+}
+
+/**
+ * Read the recording request, or null when it is not one.
+ *
+ * Only a settled `COMPLETED` refund may be recorded — recording a pending or
+ * failed attempt would put a recovery the ledger cannot prove into the read
+ * model. `amountCents` must be a positive integer: the caller reports the amount
+ * PayPal actually settled, and the store then refuses the recording entirely if
+ * it disagrees with what the proposal approved.
+ */
+async function readRecordBody(
+  request: Request,
+): Promise<
+  | {
+      readonly proposalId: string;
+      readonly subId: string;
+      readonly refundId: string;
+      readonly amountCents: number;
+      readonly currency: "USD" | "INR";
+    }
+  | null
+> {
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return null;
+  }
+  if (typeof body !== "object" || body === null) return null;
+
+  const raw = body as Record<string, unknown>;
+  const stringField = (value: unknown): value is string => typeof value === "string" && value.length > 0;
+  if (!stringField(raw.proposalId)) return null;
+  if (!stringField(raw.subId)) return null;
+  if (!stringField(raw.refundId)) return null;
+  if (raw.status !== "COMPLETED") return null;
+  if (typeof raw.amountCents !== "number" || !Number.isInteger(raw.amountCents) || raw.amountCents <= 0) {
+    return null;
+  }
+  if (raw.currency !== "USD" && raw.currency !== "INR") return null;
+
+  return {
+    proposalId: raw.proposalId,
+    subId: raw.subId,
+    refundId: raw.refundId,
+    amountCents: raw.amountCents,
+    currency: raw.currency,
+  };
 }
 
 /**
@@ -382,6 +494,7 @@ export function __setCompleteForTests(complete: AgentComplete | null): void {
 const EMPTY_STATE = {
   generatedAt: null,
   totalRiskCents: 0,
+  recoveredCents: 0,
   currency: null,
   findings: [],
   subscriptions: [],

@@ -53,6 +53,12 @@ export type StateResponse = {
   readonly lanes: readonly Lane[];
   readonly transactionCount: number;
   readonly database: boolean;
+  /**
+   * Money the refund ledger proves came back. Optional so an older response —
+   * or a test fixture — without the field reads as zero, exactly like a fresh
+   * database.
+   */
+  readonly recoveredCents?: number;
 };
 
 export type HeroFigure = {
@@ -108,6 +114,33 @@ export function heroFigure(state: StateResponse | null): HeroFigure {
       headline: "No database connected — link the account to see your figures",
       provenance: null,
       totalled: false,
+      loading: false,
+    };
+  }
+
+  // ------------------------------------------------------------ set-up ------
+  // RECOVERY BEFORE "NOTHING AT RISK" — THE ORDER IS THE HEADLINE
+  // ---------------------------------------------------------------------------
+  // After a real refund the finding is gone and the total is zero, and this
+  // screen would happily render "Nothing at risk right now" — technically true,
+  // and completely silent about WHY: money came back because the merchant
+  // pressed a button. When the server proves a recovery from the ledger, the
+  // figure is the recovered amount and the tone is `recovered`. There is no
+  // other branch in this module that renders good news, and that is deliberate:
+  // recovery has to be earned by the ledger, not inferred from a zero.
+  //
+  // The currency is read off the model like every other figure here; the sandbox
+  // merchant settles in USD, so the fallback states the environment rather than
+  // inventing a conversion.
+  const recovered = state.recoveredCents ?? 0;
+  if (recovered > 0 && state.totalRiskCents <= 0) {
+    return {
+      cents: recovered,
+      currency: state.currency ?? "USD",
+      tone: "recovered",
+      headline: "recovered after you acted",
+      provenance,
+      totalled: true,
       loading: false,
     };
   }
