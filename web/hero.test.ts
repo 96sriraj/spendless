@@ -25,6 +25,8 @@ function state(overrides: Partial<StateResponse> = {}): StateResponse {
     lanes: ["seeded_history"],
     transactionCount: 23,
     database: true,
+    // Coherent with a fresh demo: nothing has been recovered yet.
+    recoveredCents: 0,
     ...overrides,
   };
 }
@@ -83,6 +85,59 @@ describe("heroFigure", () => {
 
   it("uses the risk tone only when there is money at stake", () => {
     expect(heroFigure(state({ totalRiskCents: 1 })).tone).toBe("risk");
+  });
+
+  it("announces recovery when the risk is gone because you acted", () => {
+    // After a real refund the finding is gone, the total is zero — and that is
+    // not the same as "nothing at risk right now". Money came back because the
+    // merchant pressed a button, and the hero says exactly that in the figure
+    // the server proved from the ledger. It is the only "good news" tone.
+    const hero = heroFigure(
+      state({
+        totalRiskCents: 0,
+        recoveredCents: 1_599,
+        findings: [],
+      }),
+    );
+
+    expect(hero.tone).toBe("recovered");
+    expect(hero.cents).toBe(1_599);
+    expect(hero.currency).toBe("USD");
+    expect(hero.totalled).toBe(true);
+    expect(hero.loading).toBe(false);
+    expect(hero.headline).toMatch(/recovered/i);
+    // Not the ink sentence. "Nothing at risk right now" erases the recovery.
+    expect(hero.headline).not.toMatch(/nothing at risk/i);
+  });
+
+  it("keeps the risk tone when money was recovered but something is still at stake", () => {
+    // A partial recovery: one finding refunded, one still open. The figure that
+    // still demands attention is the remaining risk, not the recovered amount.
+    const hero = heroFigure(
+      state({
+        totalRiskCents: 2_499,
+        recoveredCents: 1_599,
+        findings: [
+          finding(),
+          finding({ subId: "sub-b", savingCents: 2_499 }),
+        ],
+        subscriptions: [{ id: "sub-a" }, { id: "sub-b" }],
+      }),
+    );
+
+    expect(hero.tone).toBe("risk");
+    expect(hero.cents).toBe(2_499);
+  });
+
+  it("behaves exactly as before when nothing has been recovered", () => {
+    // Old servers (no recoveredCents field at all) and fresh databases must both
+    // render identically to today.
+    const oldServer = heroFigure(state({ recoveredCents: undefined }));
+    expect(oldServer.tone).toBe("risk");
+
+    const fresh = heroFigure(state({ recoveredCents: 0, totalRiskCents: 0, findings: [] }));
+    expect(fresh.tone).toBe("ink");
+    expect(fresh.headline).toMatch(/nothing at risk/i);
   });
 
   it("refuses to render a figure when the findings span currencies", () => {

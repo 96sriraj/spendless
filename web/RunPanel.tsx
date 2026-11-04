@@ -41,28 +41,26 @@ import {
 } from "./runlog";
 import { formatMinor } from "./format";
 import { isReachable, requestLocalRefund } from "./localRefund";
+import { candidateOf, recordPayloadsFor, recordRefund } from "./record";
 
 /** A `\n\n`-delimited chunk can split a UTF-8 sequence, so decode per frame. */
 const decoder = new TextDecoder();
 
-export function RunPanel() {
+export function RunPanel({ onStateRefresh }: { readonly onStateRefresh: () => void }) {
   const [state, setState] = useState<RunState>(emptyRunState);
   const abort = useRef<AbortController | null>(null);
 
   const running = state.phase === "running";
 
   /**
-   * Re-read the read model after an approval.
+   * Re-read the read model after an action.
    *
    * Not a poll: the figure changes when the merchant acts, and an action is
-   * something they press. A poll here would show a stale hero number immediately
-   * after a refund, which reads as a bug rather than as a race.
+   * something they press. The refetch-and-setState itself lives in `App.tsx` —
+   * it owns the state this screen renders — and is passed down here. (It used to
+   * be a local fetch whose response was thrown away, which meant the hero could
+   * never update even in principle.)
    */
-  const refresh = useCallback(() => {
-    void fetch("/api/state")
-      .then((r) => r.json() as Promise<unknown>)
-      .catch(() => undefined);
-  }, []);
 
   const start = useCallback(async () => {
     if (abort.current !== null) return;
@@ -157,7 +155,7 @@ export function RunPanel() {
       {state.finalText.length > 0 && <p className="log__final">{state.finalText}</p>}
 
       {state.proposals.length > 0 && (
-        <Approve proposals={state.proposals} onDone={refresh} />
+        <Approve proposals={state.proposals} onDone={onStateRefresh} />
       )}
     </section>
   );
@@ -195,8 +193,7 @@ function Approve({
 }: {
   readonly proposals: readonly RunProposal[];
   readonly onDone: () => void;
-}) {
-  const summary = approveSummary(proposals);
+}) {  const summary = approveSummary(proposals);
   const [busy, setBusy] = useState(false);
   const [outcomes, setOutcomes] = useState<{ ok: boolean; message: string }[] | null>(null);
 
@@ -214,10 +211,26 @@ function Approve({
       // fabricated success.
       if (await isReachable()) {
         const payable = pending.filter((p) => p.amountCents !== null);
-        const results = await Promise.all(
-          payable.map((p) => requestLocalRefund(p.subId, p.amountCents)),
+        const attempts = await Promise.all(
+          payable.map(async (proposal) => ({
+            proposal,
+            result: await requestLocalRefund(proposal.subId, proposal.amountCents),
+          })),
         );
-        setOutcomes(results.map((r) => ({ ok: r.ok, message: r.message })));
+        setOutcomes(attempts.map((a) => ({ ok: a.result.ok, message: a.result.message })));
+
+        // Record what PayPal settled, so the store learns the refund happened
+        // and the read model stops claiming the money is still at risk. Only
+        // settled successes are recorded — a refused refund ("already refunded"
+        // on a re-run take) is shown above verbatim and writes nothing. A
+        // recording that itself fails is left alone: the screen keeps reporting
+        // the risk, which is where an unrecorded refund belongs.
+        const payloads = recordPayloadsFor(
+          payable.map(candidateOf),
+          attempts.map((a) => a.result),
+        );
+        await Promise.all(payloads.map((payload) => recordRefund(payload)));
+
         onDone();
         return;
       }

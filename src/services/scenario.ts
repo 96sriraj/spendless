@@ -61,6 +61,18 @@ export async function seedScenario(
   // same figure both times, or nobody can rehearse against it.
   const { rows } = await reseedHistory(db, { now });
 
+  // The action ledger resets with the history. The read model now reads the
+  // refund ledger, so a refund recorded against an earlier take would
+  // permanently suppress the Netflix finding on every later reseed — the same
+  // rehearsal-killer the replace-don't-accumulate rule above exists for.
+  // Foreign keys cascade `action_results` with `action_proposals`; `run_steps`
+  // clears with them so the log belongs to the take that produced it.
+  await db.batch([
+    { sql: "DELETE FROM action_results" },
+    { sql: "DELETE FROM action_proposals" },
+    { sql: "DELETE FROM run_steps" },
+  ]);
+
   const store = createD1KvStore(db, () => now.toISOString());
   let usage = 0;
   for (const [subscriptionId, daysAgo] of Object.entries(IDLE_DAYS)) {

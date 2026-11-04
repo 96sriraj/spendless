@@ -64,13 +64,21 @@ export type ReadModel = {
   /** When this was computed. A figure with no timestamp is not evidence. */
   readonly generatedAt: string;
   /**
-   * The headline. The sum of `savingCents` across findings.
+   * The headline. The sum of `savingCents` across findings — minus any finding
+   * the refund ledger proves was recovered.
    *
    * `savingCents`, never `displaySaving`: the latter is a preformatted string
    * ("$47.97 wasted") chosen per card, and adding up strings produces a number
    * that corresponds to nothing.
    */
   readonly totalRiskCents: number;
+  /**
+   * Money the refund ledger proves came back: the `amountCents` of results
+   * recorded against `executed` proposals. Recovery is proven by the ledger —
+   * a proposal in the `executed` state with a `succeeded` result row carrying a
+   * real provider refund id — never inferred from anything else.
+   */
+  readonly recoveredCents: number;
   /** Null when the findings span currencies and cannot honestly be totalled. */
   readonly currency: Currency | null;
   readonly findings: readonly ReadModelFinding[];
@@ -116,6 +124,41 @@ export async function buildReadModel(db: Database, now: Date): Promise<ReadModel
     lane: laneByMerchant.get(finding.subId) ?? "live_sandbox",
   }));
 
+  // -----------------------------------------------------------------------
+  // RECOVERY IS READ FROM THE LEDGER, AND IT REMOVES THE FINDING
+  // -----------------------------------------------------------------------
+  //
+  // An executed refund leaves two rows behind (a proposal in `executed`, a
+  // result in `succeeded` carrying a real provider refund id). Before this
+  // read, the ledger was a write-only artefact: real refunds recorded against
+  // it changed nothing here, so the screen kept claiming the money was at risk
+  // after it had come back. Reading it closes that gap.
+  //
+  // A finding for a recovered subId is EXCLUDED, not annotated — keeping it
+  // would claim money is still at risk when the refund already settled. The
+  // filter lives here, not in the core: `computeInsights` stays pure and
+  // untouched, and nothing it produced has changed.
+  const recoveredRows = await db.all<{ target_id: string | null; amount: number | null }>(
+    `SELECT p.target_id AS target_id, r.amount_cents AS amount
+       FROM action_results r
+       JOIN action_proposals p ON p.id = r.proposal_id
+      WHERE p.status = 'executed'
+        AND p.kind = 'refund'
+        AND r.status = 'succeeded'
+        AND r.provider_ref IS NOT NULL
+        AND r.provider_ref <> ''
+        AND p.target_id IS NOT NULL`,
+  );
+
+  const recoveredBySub = new Map<string, number>();
+  for (const row of recoveredRows) {
+    if (row.target_id === null || row.amount === null) continue;
+    recoveredBySub.set(row.target_id, (recoveredBySub.get(row.target_id) ?? 0) + row.amount);
+  }
+  const recoveredCents = [...recoveredBySub.values()].reduce((sum, cents) => sum + cents, 0);
+
+  const riskFindings = decorated.filter((finding) => !recoveredBySub.has(finding.subId));
+
   const currencies = new Set(
     subscriptions.map((s) => s.currency as Currency).filter((c) => c !== undefined),
   );
@@ -124,9 +167,10 @@ export async function buildReadModel(db: Database, now: Date): Promise<ReadModel
     generatedAt: now.toISOString(),
     // Summing across currencies is a number that means nothing and looks
     // authoritative, so the total is withheld rather than fudged.
-    totalRiskCents: currencies.size <= 1 ? decorated.reduce((sum, f) => sum + f.savingCents, 0) : 0,
+    totalRiskCents: currencies.size <= 1 ? riskFindings.reduce((sum, f) => sum + f.savingCents, 0) : 0,
+    recoveredCents,
     currency: currencies.size === 1 ? [...currencies][0]! : null,
-    findings: decorated,
+    findings: riskFindings,
     subscriptions,
     lanes,
     transactionCount: stored.length,

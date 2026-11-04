@@ -1,6 +1,6 @@
 # AGENTS.md — spendless
 
-**The AI agent that spends less, not more.** PayPal AI Hackathon entry (Devpost: [Build What's Next with PayPal and AI](https://paypalaihackathon.devpost.com)).
+**The AI agent that protects recurring revenue.**
 
 > **Snapshot 2026-10-17.** `bun run verify` = typecheck + **628 tests**, all green. Phases 1–2, 5 and
 > the action half of 6 are **done**. The PayPal sandbox account, app and credentials are **live**. Money
